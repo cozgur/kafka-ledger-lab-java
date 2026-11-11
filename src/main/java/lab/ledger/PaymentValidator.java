@@ -8,6 +8,10 @@ import lab.payments.PaymentCaptured;
 public final class PaymentValidator {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    /** The lab ledger is single-currency: balances are EUR minor units. Other currencies are rejected, never summed. */
+    public static final String LEDGER_CURRENCY = "EUR";
+    /** Per-event bound (10 billion EUR in cents); keeps sums far from bigint/long overflow. */
+    public static final long MAX_ABS_AMOUNT_MINOR = 1_000_000_000_000L;
 
     private PaymentValidator() {}
 
@@ -25,9 +29,12 @@ public final class PaymentValidator {
         if (amount == null || !amount.canConvertToLong() || !amount.isIntegralNumber()) {
             throw new InvalidPayloadException("amountMinor must be an integer (minor units)");
         }
+        if (Math.abs(amount.asLong()) > MAX_ABS_AMOUNT_MINOR) {
+            throw new InvalidPayloadException("amountMinor must be within +/-" + MAX_ABS_AMOUNT_MINOR);
+        }
         JsonNode currency = o.get("currency");
-        if (currency == null || !currency.isTextual() || !currency.asText().matches("[A-Z]{3}")) {
-            throw new InvalidPayloadException("currency must be an ISO 4217 code");
+        if (currency == null || !currency.isTextual() || !LEDGER_CURRENCY.equals(currency.asText())) {
+            throw new InvalidPayloadException("currency must be " + LEDGER_CURRENCY + " (single-currency ledger)");
         }
         JsonNode sequence = o.get("sequence");
         if (sequence == null || !sequence.isInt() || sequence.asInt() < 1) {

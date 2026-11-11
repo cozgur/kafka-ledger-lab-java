@@ -73,8 +73,8 @@ public class LedgerRepository implements AutoCloseable {
     /**
      * Apply one event idempotently and in per-account sequence order, in ONE transaction:
      * 1. lock the account row (concurrent applies for one account are serialised)
-     * 2. paymentId already applied     -> DUPLICATE
-     * 3. sequence <= last_sequence     -> STALE (ignored)
+     * 2. paymentId seen (applied or parked) -> same content DUPLICATE, different content CONFLICT
+     * 3. new paymentId on a taken slot (sequence <= last, or already parked) -> SEQUENCE_CONFLICT
      * 4. sequence >  last_sequence + 1 -> PARKED (gap: wait for the missing event)
      * 5. sequence == last_sequence + 1 -> APPLIED, then drain parked successors in order
      */
@@ -83,14 +83,20 @@ public class LedgerRepository implements AutoCloseable {
             jdbc.update("INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, 0) ON CONFLICT DO NOTHING",
                     e.accountId(), e.currency());
             int last = jdbc.queryForObject("SELECT last_sequence FROM balances WHERE account_id = ? FOR UPDATE", Integer.class, e.accountId());
-            if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM applied_payments WHERE payment_id = ?)", Boolean.class, e.paymentId()))) {
-                return Outcome.DUPLICATE;
-            }
-            if (e.sequence() <= last) return Outcome.STALE;
+            // Identity: a paymentId seen before (applied OR parked): same content = redelivery, different = conflict.
+            var applied = jdbc.queryForList("SELECT account_id, amount_minor, sequence FROM applied_payments WHERE payment_id = ?", e.paymentId());
+            if (!applied.isEmpty()) return sameContent(applied.get(0), e) ? Outcome.DUPLICATE : Outcome.CONFLICT;
+            var parked = jdbc.queryForList("SELECT account_id, amount_minor, sequence FROM parked_events WHERE payment_id = ?", e.paymentId());
+            if (!parked.isEmpty()) return sameContent(parked.get(0), e) ? Outcome.DUPLICATE : Outcome.CONFLICT;
+            // Slot: a NEW paymentId claiming a sequence that is already taken (applied OR parked) -> sequence conflict.
+            if (e.sequence() <= last) return Outcome.SEQUENCE_CONFLICT;
             if (e.sequence() > last + 1) {
-                jdbc.update("""
-                        INSERT INTO parked_events (account_id, sequence, payment_id, amount_minor, currency) VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT DO NOTHING""", e.accountId(), e.sequence(), e.paymentId(), e.amountMinor(), e.currency());
+                if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM parked_events WHERE account_id = ? AND sequence = ?)",
+                        Boolean.class, e.accountId(), e.sequence()))) {
+                    return Outcome.SEQUENCE_CONFLICT;
+                }
+                jdbc.update("INSERT INTO parked_events (account_id, sequence, payment_id, amount_minor, currency) VALUES (?, ?, ?, ?, ?)",
+                        e.accountId(), e.sequence(), e.paymentId(), e.amountMinor(), e.currency());
                 return Outcome.PARKED;
             }
             apply(e, false);
@@ -110,6 +116,12 @@ public class LedgerRepository implements AutoCloseable {
         });
     }
 
+    private static boolean sameContent(java.util.Map<String, Object> row, PaymentCaptured e) {
+        return e.accountId().equals(row.get("account_id"))
+                && e.amountMinor() == ((Number) row.get("amount_minor")).longValue()
+                && e.sequence() == ((Number) row.get("sequence")).intValue();
+    }
+
     private void apply(PaymentCaptured e, boolean wasParked) {
         jdbc.update("INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence, was_parked) VALUES (?, ?, ?, ?, ?)",
                 e.paymentId(), e.accountId(), e.amountMinor(), e.sequence(), wasParked);
@@ -117,7 +129,7 @@ public class LedgerRepository implements AutoCloseable {
                 e.amountMinor(), e.sequence(), e.accountId());
     }
 
-    public enum Outcome { APPLIED, DUPLICATE, STALE, PARKED }
+    public enum Outcome { APPLIED, DUPLICATE, CONFLICT, SEQUENCE_CONFLICT, PARKED }
 
     public int appliedCount() {
         return jdbc.queryForObject("SELECT count(*) FROM applied_payments", Integer.class);

@@ -62,7 +62,12 @@ public class LedgerConsumer implements AutoCloseable {
             PaymentCaptured event = PaymentValidator.parse(rec.value()); // InvalidPayloadException is not retried
             try {
                 faults.beforeApply(event, attempt(rec));
-                ledger.applyPayment(event);
+                var outcome = ledger.applyPayment(event);
+                // Conflicts are not retryable and must never be applied or silently dropped: to the DLT, for humans.
+                if (outcome == LedgerRepository.Outcome.CONFLICT) throw new ConflictException("payment-id-conflict",
+                        "paymentId " + event.paymentId() + " reused with different content");
+                if (outcome == LedgerRepository.Outcome.SEQUENCE_CONFLICT) throw new ConflictException("sequence-conflict",
+                        "sequence " + event.sequence() + " of " + event.accountId() + " is already taken by another payment");
                 faults.afterDbWrite(event, rec.partition(), rec.offset());
             } catch (RuntimeException e) {
                 throw e;
@@ -89,18 +94,20 @@ public class LedgerConsumer implements AutoCloseable {
         recoverer.setHeadersFunction((rec, ex) -> {
             Throwable cause = rootCause(ex);
             boolean invalid = cause instanceof InvalidPayloadException;
+            boolean conflict = cause instanceof ConflictException;
+            String reason = invalid ? "invalid-payload" : conflict ? ((ConflictException) cause).reason : "processing-failed";
             var h = new RecordHeaders();
             h.add("dlt.original.topic", rec.topic().getBytes(StandardCharsets.UTF_8));
             h.add("dlt.original.partition", String.valueOf(rec.partition()).getBytes(StandardCharsets.UTF_8));
             h.add("dlt.original.offset", String.valueOf(rec.offset()).getBytes(StandardCharsets.UTF_8));
-            h.add("dlt.reason", (invalid ? "invalid-payload" : "processing-failed").getBytes(StandardCharsets.UTF_8));
-            h.add("dlt.attempts", String.valueOf(invalid ? 1 : attempt(rec)).getBytes(StandardCharsets.UTF_8));
+            h.add("dlt.reason", reason.getBytes(StandardCharsets.UTF_8));
+            h.add("dlt.attempts", String.valueOf(invalid || conflict ? 1 : attempt(rec)).getBytes(StandardCharsets.UTF_8));
             h.add("dlt.error", String.valueOf(cause.getMessage()).getBytes(StandardCharsets.UTF_8));
             h.add("dlt.failed.at", Instant.now().toString().getBytes(StandardCharsets.UTF_8));
             return h;
         });
         var errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(dlt.backoffMs(), dlt.maxAttempts() - 1));
-        errorHandler.addNotRetryableExceptions(InvalidPayloadException.class);
+        errorHandler.addNotRetryableExceptions(InvalidPayloadException.class, ConflictException.class);
         container.setCommonErrorHandler(errorHandler);
         container.start();
     }
@@ -113,8 +120,18 @@ public class LedgerConsumer implements AutoCloseable {
 
     static Throwable rootCause(Throwable t) {
         Throwable c = t instanceof ListenerExecutionFailedException && t.getCause() != null ? t.getCause() : t;
-        while (c.getCause() != null && c.getCause() != c && !(c instanceof InvalidPayloadException)) c = c.getCause();
+        while (c.getCause() != null && c.getCause() != c && !(c instanceof InvalidPayloadException) && !(c instanceof ConflictException)) c = c.getCause();
         return c;
+    }
+
+    /** A payment that conflicts with an earlier one (identity or sequence slot). Not retryable. */
+    public static final class ConflictException extends RuntimeException {
+        final String reason;
+
+        ConflictException(String reason, String message) {
+            super(message);
+            this.reason = reason;
+        }
     }
 
     public void stop() {

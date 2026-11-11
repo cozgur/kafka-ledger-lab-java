@@ -29,25 +29,25 @@ class OffsetDurabilityTest {
                 @Override
                 public void beforeApply(PaymentCaptured e, int attempt) throws Exception {
                     atBeforeDb.countDown();
-                    releaseBeforeDb.await();
+                    releaseBeforeDb.await(60, java.util.concurrent.TimeUnit.SECONDS);
                 }
 
                 @Override
                 public void afterDbWrite(PaymentCaptured e, int partition, long offset) throws Exception {
                     atAfterDb.countDown();
-                    releaseAfterDb.await();
+                    releaseAfterDb.await(60, java.util.concurrent.TimeUnit.SECONDS);
                 }
             });
             lab.producer.publish(lab.topic, List.of(pay("acc-1", 1, 100)));
             try {
                 // Phase 1: record received, DB not written. Over a 1s window the broker offset must not move.
-                atBeforeDb.await();
+                assertThat(atBeforeDb.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("listener reached the gate before the DB").isTrue();
                 await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(3)).until(() -> lab.committedOffset(0) <= 0);
                 assertThat(lab.ledger.appliedCount()).isZero();
 
                 // Phase 2: DB transaction committed, listener not finished. Still no durable offset.
                 releaseBeforeDb.countDown();
-                atAfterDb.await();
+                assertThat(atAfterDb.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("listener reached the gate after the DB").isTrue();
                 assertThat(lab.ledger.appliedCount()).isEqualTo(1);
                 await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(3)).until(() -> lab.committedOffset(0) <= 0);
 

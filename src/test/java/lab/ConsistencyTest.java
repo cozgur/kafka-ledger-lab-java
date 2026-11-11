@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import lab.payments.PaymentCaptured;
-import lab.payments.PaymentsProducer;
 import lab.support.Lab;
 import org.junit.jupiter.api.Test;
 
@@ -61,7 +60,6 @@ class ConsistencyTest {
             assertThat(lab.ledger.internalMismatches()).isEmpty();          // (2) balance == sum of applied payments
             assertThat(lab.ledger.appliedCount()).isEqualTo(unique.size()); // (3) counts
             assertThat(lab.dltCount()).isEqualTo(invalid);
-            PaymentsProducer.toJson(events.get(0)); // (keeps the producer's JSON mapping in the audit's view)
         }
     }
 }

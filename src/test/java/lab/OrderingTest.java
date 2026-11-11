@@ -31,6 +31,10 @@ class OrderingTest {
             // Precondition: traffic really spread over more than one partition (otherwise ordering is trivial).
             assertThat(lab.nonEmptyPartitions()).isGreaterThan(1);
 
+            // The producer contract directly: every record's Kafka key is the accountId inside its payload.
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            for (var r : lab.readAll()) assertThat(r.key()).isEqualTo(json.readTree(r.value()).get("accountId").asText());
+
             var expected = IntStream.rangeClosed(1, 20).boxed().toList();
             for (String a : accounts) {
                 assertThat(lab.ledger.appliedSequences(a)).as("apply order for %s", a).isEqualTo(expected);

@@ -46,9 +46,8 @@ PostgreSQL 17, Testcontainers 2, JUnit 5, Awaitility, Gradle, GitHub Actions.
 Requirements: Docker and Java 21.
 
 ```bash
-./gradlew test             # main suite, test classes in parallel; containers start once per JVM
-./gradlew perfTest         # lag budget, alone
-scripts/flaky-check.sh 20  # whole suite 20x with --rerun, per-test report in build/flaky/summary.md
+./gradlew check            # everything: test (classes in parallel) -> isolatedTest (broker outage) -> perfTest (lag), each alone
+scripts/flaky-check.sh 20  # whole suite 20x, counting only tests that really ran; report in build/flaky/summary.md
 ```
 
 ### Results

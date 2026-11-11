@@ -56,3 +56,4 @@ jobs:
           path: |
             build/test-results/**/*.xml
             build/reports/lag.json
+            build/test-logs/

@@ -39,12 +39,12 @@ class RestartTest {
                 public void afterDbWrite(PaymentCaptured e, int partition, long offset) throws Exception {
                     if (processed.incrementAndGet() >= 51) { // every consumer thread stops here, not just one
                         atGate.countDown();
-                        gate.await();
+                        gate.await(60, java.util.concurrent.TimeUnit.SECONDS); // bounded: never hang the suite
                     }
                 }
             });
             lab.producer.publish(lab.topic, batch(1, 40)); // 200 events
-            atGate.await();
+            assertThat(atGate.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("consumer reached the gate").isTrue();
             var stopping = CompletableFuture.runAsync(first::stop);
             gate.countDown();
             stopping.join();

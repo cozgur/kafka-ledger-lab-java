@@ -13,7 +13,9 @@ for r in runs:
             s[1] += int(c.find("failure") is not None or c.find("error") is not None)
             s[2] = max(s[2], float(c.get("time")))
 total_fail = sum(s[1] for s in stats.values())
-lines = [f"# Flakiness check: {len(runs)} runs x {len(stats)} tests, {total_fail} failures", "",
+executions = sum(s[0] for s in stats.values())
+lines = [f"# Flakiness check: {len(runs)} runs, {len(stats)} distinct tests, {executions} executions, {total_fail} failures", "",
+         "Runs counts only tests whose XML was produced in that run (results are cleared before each run).", "",
          "| Test | Runs | Failures | Max time (s) |", "|---|---|---|---|"]
 lines += [f"| {n} | {s[0]} | {s[1]} | {s[2]:.2f} |" for n, s in sorted(stats.items())]
 open(f"{d}/summary.md", "w").write("\n".join(lines) + "\n")

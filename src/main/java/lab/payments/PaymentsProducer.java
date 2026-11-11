@@ -18,7 +18,12 @@ public class PaymentsProducer implements AutoCloseable {
     private final KafkaTemplate<String, String> template;
 
     public PaymentsProducer(String bootstrapServers) {
-        this.factory = new DefaultKafkaProducerFactory<>(Map.of(
+        this(bootstrapServers, Map.of());
+    }
+
+    /** @param overrides extra producer settings (tests use this, e.g. a short request timeout to force retries) */
+    public PaymentsProducer(String bootstrapServers, Map<String, Object> overrides) {
+        var config = new java.util.HashMap<String, Object>(Map.of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
@@ -26,6 +31,8 @@ public class PaymentsProducer implements AutoCloseable {
                 // It does NOT stop the application from sending the same event twice -> the consumer must be idempotent too.
                 ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,
                 ProducerConfig.ACKS_CONFIG, "all"));
+        config.putAll(overrides);
+        this.factory = new DefaultKafkaProducerFactory<>(config);
         this.template = new KafkaTemplate<>(factory);
     }
 

@@ -38,21 +38,28 @@ public final class Lab implements AutoCloseable {
     public final String dltTopic = topic + ".dlt";
     public final String groupId = "ledger-" + id;
     public final int partitions;
+    public final String bootstrap;
     public final Admin admin;
     public final LedgerRepository ledger;
     public final PaymentsProducer producer;
     private final List<LedgerConsumer> consumers = new CopyOnWriteArrayList<>();
 
     public Lab(int partitions) {
+        this(partitions, Infra.bootstrapServers());
+    }
+
+    /** A lab on a specific broker (e.g. a dedicated one for a test that pauses it). */
+    public Lab(int partitions, String bootstrap) {
         this.partitions = partitions;
-        this.admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, Infra.bootstrapServers()));
+        this.bootstrap = bootstrap;
+        this.admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap));
         try {
             admin.createTopics(List.of(new NewTopic(topic, partitions, (short) 1), new NewTopic(dltTopic, 1, (short) 1))).all().get();
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
         this.ledger = new LedgerRepository(Infra.POSTGRES.getJdbcUrl(), Infra.POSTGRES.getUsername(), Infra.POSTGRES.getPassword(), "t_" + id);
-        this.producer = new PaymentsProducer(Infra.bootstrapServers());
+        this.producer = new PaymentsProducer(bootstrap);
     }
 
     public Lab() {
@@ -64,7 +71,7 @@ public final class Lab implements AutoCloseable {
     }
 
     public LedgerConsumer startConsumer(lab.ledger.Faults faults) {
-        var c = new LedgerConsumer(Infra.bootstrapServers(), topic, groupId, ledger,
+        var c = new LedgerConsumer(bootstrap, topic, groupId, ledger,
                 new LedgerConsumer.DltPolicy(dltTopic, 3, 100), faults);
         consumers.add(c);
         return c;
@@ -118,7 +125,7 @@ public final class Lab implements AutoCloseable {
     /** Publish raw key/value strings, bypassing the typed producer (used for malformed payloads). */
     public void publishRaw(List<String[]> keyValues) {
         try (var p = new KafkaProducer<String, String>(Map.of(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, Infra.bootstrapServers(),
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class))) {
             for (String[] kv : keyValues) p.send(new ProducerRecord<>(topic, kv[0], kv[1]));
@@ -148,7 +155,7 @@ public final class Lab implements AutoCloseable {
     private List<ConsumerRecord<String, String>> read(String name, int n) {
         List<ConsumerRecord<String, String>> got = new ArrayList<>();
         try (var c = new KafkaConsumer<String, String>(Map.of(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, Infra.bootstrapServers(),
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap,
                 ConsumerConfig.GROUP_ID_CONFIG, "reader-" + id + "-" + UUID.randomUUID().toString().substring(0, 4),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,

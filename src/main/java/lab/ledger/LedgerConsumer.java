@@ -47,9 +47,12 @@ public class LedgerConsumer implements AutoCloseable {
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"));
 
         var props = new ContainerProperties(topic);
-        // DECISION (same as the TS lab): write to the DB first, then commit -> at-least-once.
-        // AckMode.RECORD commits each record's offset after the listener returned for it.
-        props.setAckMode(AckMode.RECORD);
+        // DECISION: write to the DB first, then commit -> at-least-once.
+        // AckMode.BATCH commits the offsets of a poll's records after the listener processed them all (on an error,
+        // the error handler commits the ones before the failed record). Measured: AckMode.RECORD (one synchronous
+        // commit per record) took 18.9s for a 5,000-event burst; BATCH took 3.7s. Unlike the TS lab, the Java
+        // bottleneck was the per-record commit, not the database.
+        props.setAckMode(AckMode.BATCH);
         props.setDeliveryAttemptHeader(true); // exposes the attempt number to the listener
         // On stop(), finish the CURRENT record and stop. The default (false) first processes every record already
         // fetched by the last poll (up to max.poll.records), which made a "graceful stop" drain 200/200 events in

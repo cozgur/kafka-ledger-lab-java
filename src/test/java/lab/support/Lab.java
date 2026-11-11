@@ -58,6 +58,8 @@ public final class Lab implements AutoCloseable {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+        awaitLeaders(admin, topic, partitions);
+        awaitLeaders(admin, dltTopic, 1);
         this.ledger = new LedgerRepository(Infra.POSTGRES.getJdbcUrl(), Infra.POSTGRES.getUsername(), Infra.POSTGRES.getPassword(), "t_" + id);
         this.producer = new PaymentsProducer(bootstrap);
     }
@@ -114,6 +116,19 @@ public final class Lab implements AutoCloseable {
     /** Simulate retention: delete every record of {@code partition} below {@code beforeOffset}. */
     public void deleteRecordsBefore(int partition, long beforeOffset) throws Exception {
         admin.deleteRecords(Map.of(new TopicPartition(topic, partition), RecordsToDelete.beforeOffset(beforeOffset))).all().get();
+    }
+
+    /**
+     * Wait until every partition's leader answers. createTopics() returns before the broker has loaded leadership: the
+     * first produce then got NOT_LEADER_OR_FOLLOWER and the idempotent producer's retries got OUT_OF_ORDER_SEQUENCE_NUMBER
+     * for the whole 120s delivery timeout (the "no ack" flake, seen in ConsistencyTest and RestartTest; client log).
+     * ListOffsets is served by the partition leader, so a successful call means the leader is ready.
+     */
+    public static void awaitLeaders(Admin admin, String topic, int partitions) {
+        Map<TopicPartition, OffsetSpec> latest = new HashMap<>();
+        for (int p = 0; p < partitions; p++) latest.put(new TopicPartition(topic, p), OffsetSpec.latest());
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(50)).ignoreExceptions()
+                .alias("leaders of " + topic).until(() -> admin.listOffsets(latest).all().get().size() == partitions);
     }
 
     /** Committed offset of our group for one partition on the broker (-1 = nothing committed). */

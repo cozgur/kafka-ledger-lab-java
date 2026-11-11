@@ -65,6 +65,9 @@ public class LedgerRepository implements AutoCloseable {
                   v_last int;
                   v_next record;
                 BEGIN
+                  -- paymentId is a GLOBAL identity; the account row lock below only serialises one account. Lock the identity
+                  -- first (transaction-scoped advisory lock), then the account. Same order in every call -> no deadlock.
+                  PERFORM pg_advisory_xact_lock(hashtext(p_payment_id));
                   INSERT INTO balances (account_id, currency, balance_minor) VALUES (p_account_id, p_currency, 0) ON CONFLICT DO NOTHING;
                   SELECT last_sequence INTO v_last FROM balances WHERE account_id = p_account_id FOR UPDATE;
                   -- identity: seen before (applied or parked)? same content = duplicate, different = conflict

@@ -29,7 +29,8 @@ public final class PaymentValidator {
         if (amount == null || !amount.canConvertToLong() || !amount.isIntegralNumber()) {
             throw new InvalidPayloadException("amountMinor must be an integer (minor units)");
         }
-        if (Math.abs(amount.asLong()) > MAX_ABS_AMOUNT_MINOR) {
+        // Direct bounds, not Math.abs: Math.abs(Long.MIN_VALUE) overflows to a negative number and would pass (review finding).
+        if (amount.asLong() < -MAX_ABS_AMOUNT_MINOR || amount.asLong() > MAX_ABS_AMOUNT_MINOR) {
             throw new InvalidPayloadException("amountMinor must be within +/-" + MAX_ABS_AMOUNT_MINOR);
         }
         JsonNode currency = o.get("currency");

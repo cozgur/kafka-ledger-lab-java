@@ -31,6 +31,8 @@ class LedgerApplicationTest {
     static void properties(DynamicPropertyRegistry registry) throws Exception {
         try (var admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, Infra.bootstrapServers()))) {
             admin.createTopics(List.of(new NewTopic(TOPIC, 3, (short) 1), new NewTopic(TOPIC + ".dlt", 1, (short) 1))).all().get();
+            lab.support.Lab.awaitLeaders(admin, TOPIC, 3);
+            lab.support.Lab.awaitLeaders(admin, TOPIC + ".dlt", 1);
         }
         registry.add("lab.kafka.bootstrap-servers", Infra::bootstrapServers);
         registry.add("lab.kafka.topic", () -> TOPIC);

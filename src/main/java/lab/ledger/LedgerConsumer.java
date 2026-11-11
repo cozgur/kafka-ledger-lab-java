@@ -19,6 +19,10 @@ public class LedgerConsumer implements AutoCloseable {
     private final ConcurrentMessageListenerContainer<String, String> container;
 
     public LedgerConsumer(String bootstrapServers, String topic, String groupId, LedgerRepository ledger) {
+        this(bootstrapServers, topic, groupId, ledger, Faults.NONE);
+    }
+
+    public LedgerConsumer(String bootstrapServers, String topic, String groupId, LedgerRepository ledger, Faults faults) {
         var consumerFactory = new DefaultKafkaConsumerFactory<String, String>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ConsumerConfig.GROUP_ID_CONFIG, groupId,
@@ -35,7 +39,15 @@ public class LedgerConsumer implements AutoCloseable {
         props.setAckMode(AckMode.RECORD);
         props.setMessageListener((MessageListener<String, String>) (ConsumerRecord<String, String> rec) -> {
             PaymentCaptured event = parse(rec.value());
-            ledger.applyPayment(event);
+            try {
+                faults.beforeApply(event, 1);
+                ledger.applyPayment(event);
+                faults.afterDbWrite(event, rec.partition(), rec.offset());
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
         });
 
         this.container = new ConcurrentMessageListenerContainer<>(consumerFactory, props);

@@ -71,24 +71,53 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     /**
-     * Idempotent apply: the dedupe row and the balance change commit in ONE transaction, so a crash can never leave
-     * "marked applied but balance unchanged" (lost payment) or "balance changed but not marked" (double-apply).
+     * Apply one event idempotently and in per-account sequence order, in ONE transaction:
+     * 1. lock the account row (concurrent applies for one account are serialised)
+     * 2. paymentId already applied     -> DUPLICATE
+     * 3. sequence <= last_sequence     -> STALE (ignored)
+     * 4. sequence >  last_sequence + 1 -> PARKED (gap: wait for the missing event)
+     * 5. sequence == last_sequence + 1 -> APPLIED, then drain parked successors in order
      */
     public Outcome applyPayment(PaymentCaptured e) {
         return tx.execute(status -> {
-            int inserted = jdbc.update("""
-                    INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence) VALUES (?, ?, ?, ?)
-                    ON CONFLICT (payment_id) DO NOTHING""", e.paymentId(), e.accountId(), e.amountMinor(), e.sequence());
-            if (inserted == 0) return Outcome.DUPLICATE;
-            jdbc.update("""
-                    INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, ?)
-                    ON CONFLICT (account_id) DO UPDATE SET balance_minor = balances.balance_minor + EXCLUDED.balance_minor""",
-                    e.accountId(), e.currency(), e.amountMinor());
+            jdbc.update("INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, 0) ON CONFLICT DO NOTHING",
+                    e.accountId(), e.currency());
+            int last = jdbc.queryForObject("SELECT last_sequence FROM balances WHERE account_id = ? FOR UPDATE", Integer.class, e.accountId());
+            if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM applied_payments WHERE payment_id = ?)", Boolean.class, e.paymentId()))) {
+                return Outcome.DUPLICATE;
+            }
+            if (e.sequence() <= last) return Outcome.STALE;
+            if (e.sequence() > last + 1) {
+                jdbc.update("""
+                        INSERT INTO parked_events (account_id, sequence, payment_id, amount_minor, currency) VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT DO NOTHING""", e.accountId(), e.sequence(), e.paymentId(), e.amountMinor(), e.currency());
+                return Outcome.PARKED;
+            }
+            apply(e, false);
+            last = e.sequence();
+            for (;;) { // drain parked successors in order
+                var next = jdbc.query("""
+                        DELETE FROM parked_events WHERE account_id = ? AND sequence = ?
+                        RETURNING payment_id, amount_minor, currency""",
+                        (rs, i) -> new PaymentCaptured(rs.getString(1), e.accountId(), rs.getLong(2), rs.getString(3), 0),
+                        e.accountId(), last + 1);
+                if (next.isEmpty()) break;
+                last++;
+                var p = next.get(0);
+                apply(new PaymentCaptured(p.paymentId(), p.accountId(), p.amountMinor(), p.currency(), last), true);
+            }
             return Outcome.APPLIED;
         });
     }
 
-    public enum Outcome { APPLIED, DUPLICATE }
+    private void apply(PaymentCaptured e, boolean wasParked) {
+        jdbc.update("INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence, was_parked) VALUES (?, ?, ?, ?, ?)",
+                e.paymentId(), e.accountId(), e.amountMinor(), e.sequence(), wasParked);
+        jdbc.update("UPDATE balances SET balance_minor = balance_minor + ?, last_sequence = ? WHERE account_id = ?",
+                e.amountMinor(), e.sequence(), e.accountId());
+    }
+
+    public enum Outcome { APPLIED, DUPLICATE, STALE, PARKED }
 
     /** Sequences of an account in the order the ledger applied them. */
     public java.util.List<Integer> appliedSequences(String accountId) {

@@ -1,0 +1,66 @@
+package lab.ledger;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import lab.payments.PaymentCaptured;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+/**
+ * Ledger persistence. Each instance works inside its own Postgres schema, so tests can run in parallel
+ * against one database without seeing each other's rows.
+ */
+public class LedgerRepository implements AutoCloseable {
+
+    private final HikariDataSource dataSource;
+    protected final JdbcTemplate jdbc;
+
+    public LedgerRepository(String jdbcUrl, String user, String password, String schema) {
+        if (!schema.matches("[a-z_][a-z0-9_]*")) throw new IllegalArgumentException("unsafe schema name: " + schema);
+        HikariConfig cfg = new HikariConfig();
+        cfg.setJdbcUrl(jdbcUrl);
+        cfg.setUsername(user);
+        cfg.setPassword(password);
+        cfg.setMaximumPoolSize(6);
+        cfg.setSchema(schema); // search_path for every pooled connection
+        // Create the schema with a throwaway connection before the pool starts using it.
+        try (var bootstrap = new HikariDataSource(withoutSchema(cfg))) {
+            new JdbcTemplate(bootstrap).execute("CREATE SCHEMA IF NOT EXISTS " + schema);
+        }
+        this.dataSource = new HikariDataSource(cfg);
+        this.jdbc = new JdbcTemplate(dataSource);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS balances (
+                  account_id    text PRIMARY KEY,
+                  currency      text   NOT NULL,
+                  balance_minor bigint NOT NULL
+                )""");
+    }
+
+    private static HikariConfig withoutSchema(HikariConfig cfg) {
+        HikariConfig c = new HikariConfig();
+        c.setJdbcUrl(cfg.getJdbcUrl());
+        c.setUsername(cfg.getUsername());
+        c.setPassword(cfg.getPassword());
+        c.setMaximumPoolSize(1);
+        return c;
+    }
+
+    /** NAIVE on purpose (step 1): no idempotency, no sequence check. Later tests drive the fixes. */
+    public void applyPayment(PaymentCaptured e) {
+        jdbc.update("""
+                INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, ?)
+                ON CONFLICT (account_id) DO UPDATE SET balance_minor = balances.balance_minor + EXCLUDED.balance_minor""",
+                e.accountId(), e.currency(), e.amountMinor());
+    }
+
+    /** Balance in minor units, or null if the account has no row. */
+    public Long balanceOf(String accountId) {
+        return jdbc.query("SELECT balance_minor FROM balances WHERE account_id = ?",
+                rs -> rs.next() ? rs.getLong(1) : null, accountId);
+    }
+
+    @Override
+    public void close() {
+        dataSource.close();
+    }
+}

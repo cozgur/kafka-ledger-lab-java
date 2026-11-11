@@ -109,6 +109,12 @@ public final class Lab implements AutoCloseable {
         admin.deleteRecords(Map.of(new TopicPartition(topic, partition), RecordsToDelete.beforeOffset(beforeOffset))).all().get();
     }
 
+    /** Committed offset of our group for one partition on the broker (-1 = nothing committed). */
+    public long committedOffset(int partition) throws Exception {
+        var c = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get().get(new TopicPartition(topic, partition));
+        return c == null ? -1 : c.offset();
+    }
+
     /** Publish raw key/value strings, bypassing the typed producer (used for malformed payloads). */
     public void publishRaw(List<String[]> keyValues) {
         try (var p = new KafkaProducer<String, String>(Map.of(

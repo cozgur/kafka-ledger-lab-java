@@ -102,4 +102,45 @@ class DeadLetterTest {
             assertThat(lab.dltCount()).isZero();
         }
     }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "a payload that is {0} is dead-lettered and the next payment still flows")
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = {
+            "JSON null|null", "a JSON number|42", "a JSON string|'\"payment\"'", "a JSON array|[]", "not JSON at all|{oops"})
+    void nonObjectPayloadsAreDeadLettered(String name, String value) throws Exception {
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.publishRaw(List.of(new String[] {"acc-1", value}, new String[] {"acc-2", json(pay("acc-2", 1, 50))}));
+            drained(lab);
+            assertThat(lab.ledger.balanceOf("acc-2")).isEqualTo(50);
+            var dead = lab.readDlt(1).get(0);
+            assertThat(dead.value()).isEqualTo(value);
+            assertThat(header(dead, "dlt.reason")).isEqualTo("invalid-payload");
+        }
+    }
+
+    @Test
+    void aNonEurPaymentIsRejectedAndTheNextPaymentStillFlows() throws Exception {
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.publishRaw(List.of(
+                    new String[] {"acc-1", json(pay("acc-1", 1, 100))},
+                    new String[] {"acc-1", json(new PaymentCaptured("acc-1-2", "acc-1", 100, "USD", 2))},
+                    new String[] {"acc-1", json(pay("acc-1", 2, 30, "acc-1-2-eur"))}));
+            drained(lab);
+            assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(130); // never 200 or 230
+            var dead = lab.readDlt(1).get(0);
+            assertThat(header(dead, "dlt.reason")).isEqualTo("invalid-payload");
+            assertThat(header(dead, "dlt.error")).contains("currency");
+        }
+    }
+
+    @Test
+    void anAmountAboveThePerEventBoundIsAnInvalidPayload() throws Exception {
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.publishRaw(List.<String[]>of(new String[] {"acc-1", json(pay("acc-1", 1, 1_000_000_000_001L))}));
+            drained(lab);
+            assertThat(header(lab.readDlt(1).get(0), "dlt.error")).contains("amountMinor");
+        }
+    }
 }

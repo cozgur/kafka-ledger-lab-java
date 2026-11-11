@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import lab.ledger.Faults;
 import lab.payments.PaymentCaptured;
 import lab.support.Lab;
+import static lab.support.Lab.header;
 import org.junit.jupiter.api.Test;
 
 /** At-least-once delivery + idempotent consumer: the same payment may arrive twice; the balance changes once. */
@@ -49,6 +50,49 @@ class IdempotencyTest {
 
             assertThat(deliveries.get()).as("the redelivery really happened").isEqualTo(2);
             assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(100);
+        }
+    }
+
+    @Test
+    void aReusedPaymentIdWithDifferentContentIsAConflictDeadLetteredNeverApplied() throws Exception {
+        // Same paymentId with a new sequence (e.g. an upstream retry that re-assigned the sequence). The sequence
+        // check cannot catch it (2 is the next expected sequence); only the paymentId identity can.
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.producer.publish(lab.topic, List.of(P1, pay("acc-1", 2, 100, "p1")));
+            lab.producer.publish(lab.topic, List.of(pay("acc-1", 2, -30, "p2")));
+            drained(lab);
+            assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(70);
+            assertThat(lab.ledger.appliedSequences("acc-1")).containsExactly(1, 2);
+            assertThat(header(lab.readDlt(1).get(0), "dlt.reason")).isEqualTo("payment-id-conflict");
+        }
+    }
+
+    @Test
+    void aParkedPaymentsIdReusedWithDifferentContentIsAConflictTooNotSilentlyDropped() throws Exception {
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.producer.publish(lab.topic, List.of(pay("acc-1", 2, 10, "p2"), pay("acc-1", 2, 999, "p2"), pay("acc-1", 1, 100, "p1")));
+            drained(lab);
+            assertThat(lab.ledger.appliedSequences("acc-1")).containsExactly(1, 2);
+            assertThat(lab.ledger.parkedSequences("acc-1")).isEmpty();
+            assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(110); // the first p2 counts, the 999 never does
+            var dead = lab.readDlt(1).get(0);
+            assertThat(header(dead, "dlt.reason")).isEqualTo("payment-id-conflict");
+            assertThat(dead.value()).contains("999");
+        }
+    }
+
+    @Test
+    void twoDifferentPaymentsClaimingTheSameParkedSequenceTheSecondIsASequenceConflict() throws Exception {
+        try (var lab = new Lab(1)) {
+            lab.startConsumer();
+            lab.producer.publish(lab.topic, List.of(pay("acc-1", 2, 10, "p2"), pay("acc-1", 2, 20, "p3"), pay("acc-1", 1, 100, "p1")));
+            drained(lab);
+            assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(110);
+            var dead = lab.readDlt(1).get(0);
+            assertThat(header(dead, "dlt.reason")).isEqualTo("sequence-conflict");
+            assertThat(dead.value()).contains("\"p3\"");
         }
     }
 }

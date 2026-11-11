@@ -63,6 +63,9 @@ Measured locally on 2026-11-11 (Apple Silicon laptop, Docker Desktop, images cac
   showed `NOT_LEADER_OR_FOLLOWER`, then the idempotent producer's retries failing with `OUT_OF_ORDER_SEQUENCE_NUMBER` for the whole delivery
   timeout. Tests now wait until every partition leader answers before producing; the error is absent from the client logs of all 20 runs.
   Earlier flakiness counts in the history were inflated by a bug in my own script (it credited runs with stale results) and are withdrawn.
+- **CI (GitHub Actions, ubuntu-latest):** [run 43105506842](https://github.com/cozgur/kafka-ledger-lab-java/actions/runs/43105506842):
+  `compile` and `event-streaming` in parallel, **40 tests, 0 failures**; lag burst drained in 1,723 ms on the runner. Evidence (JUnit XML,
+  lag.json, Kafka client logs) is attached to each run as an artifact.
 
 ### Read more
 

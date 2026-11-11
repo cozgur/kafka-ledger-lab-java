@@ -28,8 +28,8 @@ differently from the TypeScript version.
 
 ## Out of scope
 
-Exactly-once across Kafka and Postgres; Kafka transactions; multi-broker failover, ISR, leader election; real process kill; rebalance between two
-consumer instances; DB failure mid-transaction; DLT write failure; Avro on the wire; multi-version schema replay; alerting/repair for parked and
+Exactly-once across Kafka and Postgres; Kafka transactions; multi-broker failover, ISR, leader election; real process kill (also during a
+rebalance; a graceful rebalance between two instances is tested); DB failure mid-transaction; DLT write failure; Avro on the wire; multi-version schema replay; alerting/repair for parked and
 dead-lettered events; security; production performance.
 
 ## Consequences

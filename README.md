@@ -41,6 +41,7 @@ PostgreSQL 17, Testcontainers 2, JUnit 5, Awaitility, Gradle, GitHub Actions.
 | `OutOfOrderTest` | Out-of-order and late events are applied in sequence (park until the gap fills) |
 | `OffsetDurabilityTest` | The offset becomes durable only after the DB write and the listener completed (the at-least-once loss window) |
 | `RestartTest` | A graceful stop mid-stream and restart loses nothing and applies nothing twice (a real process kill is not tested) |
+| `RebalanceTest` | A second instance joins the group mid-stream and the first one leaves: partitions move twice, nothing is lost or applied twice, per-account order holds |
 | `DeadLetterTest` | Poison messages (bad fields, JSON null/array/number, bad JSON, non-EUR, amount out of bound) go to the DLT with diagnostics; processing errors after 3 attempts; the partition keeps flowing |
 | `ReplayTest` | Reset the group offset and replay: identical ledger; missing history is parked, not guessed |
 | `BrokerOutageTest` | Broker frozen while producing: no loss, no duplicate records (idempotent producer, retries forced), ledger correct |
@@ -62,7 +63,8 @@ scripts/flaky-check.sh 20  # whole suite 20x, counting only tests that really ra
 
 Measured locally on 2026-11-11 (Apple Silicon laptop, Docker Desktop, images cached):
 
-- **40 tests** in 14 classes. `./gradlew check` runs `test` (38 tests, classes in parallel, ~30s), then `isolatedTest` (broker outage) and
+- **40 tests** in 14 classes at the time of the 20x run below (`RebalanceTest` was added afterwards and passed 5/5 runs on its own).
+  `./gradlew check` runs `test` (classes in parallel, classes in parallel, ~30s), then `isolatedTest` (broker outage) and
   `perfTest` (lag budget), each alone.
 - **Flakiness: 20 consecutive runs, 800 test executions, 0 failures.** Results are cleared before every run and a run only counts tests that
   really executed; all three tasks ran in all 20 runs.
@@ -83,6 +85,6 @@ Measured locally on 2026-11-11 (Apple Silicon laptop, Docker Desktop, images cac
 
 ### Out of scope
 
-Real process kill (SIGKILL/pod loss), rebalance between two consumer instances, DB failure mid-transaction, DLT write failure,
+Real process kill (SIGKILL/pod loss) and an instance dying during a rebalance, DB failure mid-transaction, DLT write failure,
 exactly-once across Kafka and Postgres / Kafka transactions, multi-broker failover, Avro on the wire, multi-version schema replay,
 alerting/repair for parked and dead-lettered events, security, production performance testing. The ledger is EUR-only.

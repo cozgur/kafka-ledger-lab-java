@@ -134,6 +134,12 @@ public class LedgerConsumer implements AutoCloseable {
         }
     }
 
+    /** Partitions currently assigned to this instance (across its consumer threads). */
+    public int assignedPartitionCount() {
+        var assigned = container.getAssignedPartitions();
+        return assigned == null ? 0 : assigned.size();
+    }
+
     public void stop() {
         container.stop();
     }

@@ -63,7 +63,8 @@ public final class Lab implements AutoCloseable {
     }
 
     public LedgerConsumer startConsumer(lab.ledger.Faults faults) {
-        var c = new LedgerConsumer(Infra.bootstrapServers(), topic, groupId, ledger, faults);
+        var c = new LedgerConsumer(Infra.bootstrapServers(), topic, groupId, ledger,
+                new LedgerConsumer.DltPolicy(dltTopic, 3, 100), faults);
         consumers.add(c);
         return c;
     }

@@ -23,18 +23,21 @@ class IdempotencyTest {
     }
 
     @Test
-    void producerRetrySameEventPublishedTwiceIsAppliedOnce() {
+    void applicationResendTheSameEventAsTwoRecordsIsAppliedOnceAndIsNotDeadLettered() throws Exception {
         try (var lab = new Lab()) {
             lab.startConsumer();
             lab.producer.publish(lab.topic, List.of(P1));
-            lab.producer.publish(lab.topic, List.of(P1)); // app-level resend (e.g. timeout on the first attempt)
+            lab.producer.publish(lab.topic, List.of(P1)); // the application sends it again: two separate Kafka records
             drained(lab);
             assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(100);
+            // Recognised as a duplicate, not mistaken for a conflict: a duplicate must not land in the DLT.
+            assertThat(lab.ledger.appliedCount()).isEqualTo(1);
+            assertThat(lab.dltCount()).isZero();
         }
     }
 
     @Test
-    void failureAfterDbWriteBeforeOffsetCommitRedeliveryIsAppliedOnce() {
+    void failureAfterDbWriteBeforeOffsetCommitRedeliveryIsAppliedOnce() throws Exception {
         try (var lab = new Lab()) {
             var deliveries = new AtomicInteger();
             // The first delivery fails right after the DB transaction committed and before the offset is committed.
@@ -50,6 +53,8 @@ class IdempotencyTest {
 
             assertThat(deliveries.get()).as("the redelivery really happened").isEqualTo(2);
             assertThat(lab.ledger.balanceOf("acc-1")).isEqualTo(100);
+            assertThat(lab.ledger.appliedCount()).isEqualTo(1);
+            assertThat(lab.dltCount()).isZero();
         }
     }
 

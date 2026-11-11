@@ -134,13 +134,27 @@ class DeadLetterTest {
         }
     }
 
-    @Test
-    void anAmountAboveThePerEventBoundIsAnInvalidPayload() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest(name = "amount {0} is rejected as invalid, the ledger is untouched")
+    @org.junit.jupiter.params.provider.ValueSource(longs = {1_000_000_000_001L, -1_000_000_000_001L, Long.MIN_VALUE, Long.MAX_VALUE})
+    void amountsOutsideThePerEventBoundAreInvalidPayloads(long amount) throws Exception {
         try (var lab = new Lab(1)) {
             lab.startConsumer();
-            lab.publishRaw(List.<String[]>of(new String[] {"acc-1", json(pay("acc-1", 1, 1_000_000_000_001L))}));
+            lab.publishRaw(List.<String[]>of(new String[] {"acc-1", json(pay("acc-1", 1, amount))}));
             drained(lab);
-            assertThat(header(lab.readDlt(1).get(0), "dlt.error")).contains("amountMinor");
+            var dead = lab.readDlt(1).get(0);
+            assertThat(header(dead, "dlt.reason")).isEqualTo("invalid-payload");
+            assertThat(header(dead, "dlt.error")).contains("amountMinor");
+            assertThat(lab.ledger.appliedCount()).isZero();
+            assertThat(lab.ledger.balanceOf("acc-1")).isNull();
+        }
+    }
+
+    @Test
+    void amountsExactlyAtTheBoundAreAccepted() {
+        long max = lab.ledger.PaymentValidator.MAX_ABS_AMOUNT_MINOR;
+        for (long amount : new long[] {max, -max}) {
+            String raw = json(pay("acc-1", 1, amount));
+            assertThat(lab.ledger.PaymentValidator.parse(raw).amountMinor()).isEqualTo(amount);
         }
     }
 }

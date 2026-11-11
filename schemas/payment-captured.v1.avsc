@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "PaymentCaptured",
+  "namespace": "lab.payments",
+  "doc": "A captured payment to be applied to an account balance. Keyed by accountId.",
+  "fields": [
+    { "name": "paymentId", "type": "string", "doc": "Globally unique; the idempotency key" },
+    { "name": "accountId", "type": "string", "doc": "Kafka message key" },
+    { "name": "amountMinor", "type": "long", "doc": "Integer minor units (cents)" },
+    { "name": "currency", "type": "string", "doc": "ISO 4217" },
+    { "name": "sequence", "type": "int", "doc": "Per-account, starts at 1" }
+  ]
+}

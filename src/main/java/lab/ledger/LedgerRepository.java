@@ -129,6 +129,21 @@ public class LedgerRepository implements AutoCloseable {
                 (rs, i) -> rs.getString(1) + ":" + rs.getLong(2) + ":" + rs.getInt(3));
     }
 
+    /** Accounts whose balance differs from the sum of their applied payments (should always be empty). */
+    public java.util.List<String> internalMismatches() {
+        return jdbc.query("""
+                SELECT b.account_id FROM balances b LEFT JOIN applied_payments a ON a.account_id = b.account_id
+                GROUP BY b.account_id, b.balance_minor HAVING b.balance_minor <> COALESCE(SUM(a.amount_minor), 0)""",
+                (rs, i) -> rs.getString(1));
+    }
+
+    /** Balance per account. */
+    public java.util.Map<String, Long> balances() {
+        java.util.Map<String, Long> m = new java.util.TreeMap<>();
+        jdbc.query("SELECT account_id, balance_minor FROM balances", rs -> { m.put(rs.getString(1), rs.getLong(2)); });
+        return m;
+    }
+
     /** Drop all ledger state (used before a replay rebuild). */
     public void wipe() {
         jdbc.execute("TRUNCATE balances, applied_payments, parked_events");

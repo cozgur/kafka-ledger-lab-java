@@ -10,8 +10,8 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 pass=0; fail=0; t_all=$(date +%s)
 for i in $(seq 1 "$N"); do
   t0=$(date +%s)
-  if ./gradlew test --rerun perfTest --rerun --console=plain >"$OUT/run-$i.log" 2>&1 \
-    && ! grep -qE "Task :(test|perfTest) UP-TO-DATE" "$OUT/run-$i.log"; then  # a skipped task is not a pass
+  if ./gradlew test --rerun isolatedTest --rerun perfTest --rerun --console=plain >"$OUT/run-$i.log" 2>&1 \
+    && ! grep -qE "Task :(test|isolatedTest|perfTest) UP-TO-DATE" "$OUT/run-$i.log"; then  # a skipped task is not a pass
     pass=$((pass + 1)); r=PASS
   else
     fail=$((fail + 1)); r=FAIL

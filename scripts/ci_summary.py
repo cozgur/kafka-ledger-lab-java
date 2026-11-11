@@ -10,7 +10,7 @@ for f in sorted(glob.glob("build/test-results/*/TEST-*.xml")):
     for case in suite.iter("testcase"):
         failed = case.find("failure") is not None or case.find("error") is not None
         rows.append(f"| {'❌' if failed else '✅'} | `{case.get('classname').replace('lab.', '', 1)}` {case.get('name')} | {float(case.get('time')):.2f} |")
-out.append(f"**{tests} tests, {failures} failures, {errors} errors, {time:.1f}s** (main suite in parallel, then the lag test alone)")
+out.append(f"**{tests} tests, {failures} failures, {errors} errors, {time:.1f}s** (main suite in parallel, then the broker-outage and lag tests alone)")
 out += ["", "| Result | Test | Time (s) |", "|---|---|---|", *rows]
 if os.path.exists("build/reports/lag.json"):
     l = json.load(open("build/reports/lag.json"))

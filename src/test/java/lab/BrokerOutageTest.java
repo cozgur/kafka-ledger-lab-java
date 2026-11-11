@@ -15,6 +15,7 @@ import lab.support.Infra;
 import lab.support.Lab;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.kafka.KafkaContainer;
 
@@ -25,7 +26,12 @@ import org.testcontainers.kafka.KafkaContainer;
  * really retries during the 3s outage: measured, with enable.idempotence=false the same run wrote 90 records instead
  * of 60 (30 duplicates); with the default 30s timeout no retry happened and the check proved nothing. Uses its OWN broker so pausing it does not
  * disturb the other test classes running in parallel. Out of scope: multi-broker failover, ISR, leader election.
+ *
+ * Runs in the separate `isolatedTest` task, not next to the main suite: in one of 20 runs a producer in
+ * ConsistencyTest (shared broker) got no ack for 120s while this test was pausing its own broker. The root cause was
+ * not proven, but Docker-level fault injection should not share the machine with other tests.
  */
+@Tag("isolated")
 class BrokerOutageTest {
 
     static final KafkaContainer BROKER = new KafkaContainer(Infra.KAFKA_IMAGE);

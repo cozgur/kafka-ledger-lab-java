@@ -29,7 +29,7 @@ dependencies {
 
 // Main suite: everything except the performance budget, test classes in parallel.
 tasks.test {
-    useJUnitPlatform { excludeTags("perf") }
+    useJUnitPlatform { excludeTags("perf", "isolated") }
     testLogging { events("passed", "failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }
 
@@ -43,4 +43,15 @@ val perfTest by tasks.registering(Test::class) {
     shouldRunAfter(tasks.test)
     testLogging { events("passed", "failed"); showStandardStreams = true }
 }
-tasks.check { dependsOn(perfTest) }
+// Docker-level fault injection (pausing a broker) runs alone too, after the main suite.
+val isolatedTest by tasks.registering(Test::class) {
+    description = "Tests that manipulate Docker (broker outage), run alone."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("isolated") }
+    shouldRunAfter(tasks.test)
+    testLogging { events("passed", "failed") }
+}
+perfTest { shouldRunAfter(isolatedTest) }
+tasks.check { dependsOn(isolatedTest, perfTest) }

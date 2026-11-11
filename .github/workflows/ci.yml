@@ -42,6 +42,8 @@ jobs:
           wait
       - name: Event-streaming tests (test classes in parallel)
         run: ./gradlew test
+      - name: Broker outage test (alone; pauses its own broker)
+        run: ./gradlew isolatedTest
       - name: Lag budget test (alone, no competing load)
         run: ./gradlew perfTest
       - name: Publish evidence to the job summary

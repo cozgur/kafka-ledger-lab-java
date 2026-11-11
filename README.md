@@ -54,16 +54,15 @@ scripts/flaky-check.sh 20  # whole suite 20x, counting only tests that really ra
 
 Measured locally on 2026-11-11 (Apple Silicon laptop, Docker Desktop, images cached):
 
-- **35 tests** in 13 classes. `./gradlew test` (33 tests, classes in parallel) takes ~30s; then `isolatedTest` (broker outage) and
-  `perfTest` (lag budget) run alone.
-- **Lag burst:** 5,000 events drained in 1.0-1.8s across 40 runs (budget 5s). It started at 18.9s; see the commit history.
-- **Flakiness: 1,893 test executions over 55 suite runs, 2 failures, both in `ConsistencyTest`** (about 1 in 28 runs of the main
-  suite). In both, a producer got no broker acknowledgement for one partition for 120s (`Expiring N record(s) ... 120001 ms`) while
-  the 11 other test classes were starting in parallel. **Root cause not found yet:** it did not reproduce in 15 further runs with
-  client logging on, and the first hypothesis (interference from the broker-outage test) was refuted when it recurred with that test
-  isolated. Kafka client logs are now written to `build/test-logs/kafka-clients.log` for the next occurrence. I am not claiming
-  "0 flaky" for this repo.
-- CI: see the latest GitHub Actions run of this repository.
+- **40 tests** in 14 classes. `./gradlew check` runs `test` (38 tests, classes in parallel, ~30s), then `isolatedTest` (broker outage) and
+  `perfTest` (lag budget), each alone.
+- **Flakiness: 20 consecutive runs, 800 test executions, 0 failures.** Results are cleared before every run and a run only counts tests that
+  really executed; all three tasks ran in all 20 runs.
+- **Lag burst:** 5,000 events drained in 1.0-2.0s across the 20 runs (budget 5s). It started at 18.9s; see the commit history.
+- **A flaky test was found and fixed on the way.** Producers sometimes got no ack for 120s right after a topic was created. The client log
+  showed `NOT_LEADER_OR_FOLLOWER`, then the idempotent producer's retries failing with `OUT_OF_ORDER_SEQUENCE_NUMBER` for the whole delivery
+  timeout. Tests now wait until every partition leader answers before producing; the error is absent from the client logs of all 20 runs.
+  Earlier flakiness counts in the history were inflated by a bug in my own script (it credited runs with stale results) and are withdrawn.
 
 ### Read more
 

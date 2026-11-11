@@ -45,7 +45,7 @@ Every test is a way this can be violated, plus a check that it isn't.
 
 ## Rules
 
-- No fixed sleeps: Awaitility polls observable state (consumer lag, delivery counts) with a timeout. Negative checks use a bounded `during` window.
+- No sleep is used to wait for a result: tests poll observable state (consumer lag, delivery counts) with timeouts and use synchronization gates for fault injection. Two fixed intervals exist on purpose: a 100 ms sampling interval in LagBudgetTest and one bounded 500 ms negative-observation window in ConcurrentIdentityTest (session B has not finished while A's transaction is open). Other negative checks use a bounded Awaitility `during` window.
 - Each test owns its topic, DLT, consumer group, DB schema and registry subject. The outage test has its own broker.
 - A test must be able to fail: red first where the mechanism didn't exist yet, otherwise a mutation check.
 - Fault-injection tests assert the injected fault really happened.

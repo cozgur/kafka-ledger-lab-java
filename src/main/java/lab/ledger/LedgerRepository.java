@@ -36,15 +36,28 @@ public class LedgerRepository implements AutoCloseable {
                 CREATE TABLE IF NOT EXISTS balances (
                   account_id    text PRIMARY KEY,
                   currency      text   NOT NULL,
-                  balance_minor bigint NOT NULL
+                  balance_minor bigint NOT NULL,
+                  last_sequence int    NOT NULL DEFAULT 0  -- highest per-account sequence applied so far
                 )""");
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS applied_payments (
                   payment_id   text PRIMARY KEY,   -- the idempotency key
+                  apply_order  bigserial,          -- global order in which the ledger applied events
+                  was_parked   boolean NOT NULL DEFAULT false,
                   account_id   text   NOT NULL,
                   amount_minor bigint NOT NULL,
                   sequence     int    NOT NULL,
                   applied_at   timestamptz NOT NULL DEFAULT now()
+                )""");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS parked_events (
+                  account_id text NOT NULL,
+                  sequence   int  NOT NULL,
+                  payment_id text NOT NULL,
+                  amount_minor bigint NOT NULL,
+                  currency   text NOT NULL,
+                  parked_at  timestamptz NOT NULL DEFAULT now(),
+                  PRIMARY KEY (account_id, sequence)
                 )""");
     }
 
@@ -76,6 +89,20 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     public enum Outcome { APPLIED, DUPLICATE }
+
+    /** Sequences of an account in the order the ledger applied them. */
+    public java.util.List<Integer> appliedSequences(String accountId) {
+        return jdbc.queryForList("SELECT sequence FROM applied_payments WHERE account_id = ? ORDER BY apply_order", Integer.class, accountId);
+    }
+
+    /** Sequences of an account that waited in parked_events before being applied. */
+    public java.util.List<Integer> sequencesAppliedFromPark(String accountId) {
+        return jdbc.queryForList("SELECT sequence FROM applied_payments WHERE account_id = ? AND was_parked ORDER BY apply_order", Integer.class, accountId);
+    }
+
+    public java.util.List<Integer> parkedSequences(String accountId) {
+        return jdbc.queryForList("SELECT sequence FROM parked_events WHERE account_id = ? ORDER BY sequence", Integer.class, accountId);
+    }
 
     /** Balance in minor units, or null if the account has no row. */
     public Long balanceOf(String accountId) {

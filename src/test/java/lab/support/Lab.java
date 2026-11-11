@@ -74,6 +74,13 @@ public final class Lab implements AutoCloseable {
         }
     }
 
+    /** Number of partitions of the main topic that hold at least one record. */
+    public long nonEmptyPartitions() throws Exception {
+        Map<TopicPartition, OffsetSpec> latest = new HashMap<>();
+        for (int p = 0; p < partitions; p++) latest.put(new TopicPartition(topic, p), OffsetSpec.latest());
+        return admin.listOffsets(latest).all().get().values().stream().filter(i -> i.offset() > 0).count();
+    }
+
     @Override
     public void close() {
         consumers.forEach(LedgerConsumer::close);

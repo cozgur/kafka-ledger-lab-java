@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew compileJava compileTestJava
+
+  # Runs in parallel with compile. Real Kafka (KRaft), Schema Registry and PostgreSQL via Testcontainers.
+  event-streaming:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Pull container images
+        run: |
+          docker pull apache/kafka:4.1.1 &
+          docker pull confluentinc/cp-schema-registry:8.1.0 &
+          docker pull postgres:17-alpine &
+          wait
+      - name: Event-streaming tests (test classes in parallel)
+        run: ./gradlew test
+      - name: Lag budget test (alone, no competing load)
+        run: ./gradlew perfTest
+      - name: Publish evidence to the job summary
+        if: always()
+        run: python3 scripts/ci_summary.py >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: event-streaming-evidence
+          path: |
+            build/test-results/**/*.xml
+            build/reports/lag.json

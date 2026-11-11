@@ -4,6 +4,7 @@ import static lab.support.Payments.pay;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +33,7 @@ class OrderingTest {
             assertThat(lab.nonEmptyPartitions()).isGreaterThan(1);
 
             // The producer contract directly: every record's Kafka key is the accountId inside its payload.
-            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            var json = new ObjectMapper();
             for (var r : lab.readAll()) assertThat(r.key()).isEqualTo(json.readTree(r.value()).get("accountId").asText());
 
             var expected = IntStream.rangeClosed(1, 20).boxed().toList();

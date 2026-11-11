@@ -2,6 +2,9 @@ package lab.ledger;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import lab.payments.PaymentCaptured;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -142,13 +145,13 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     /** All balances sorted by account: a comparable snapshot of the ledger state ("account:balance:lastSequence"). */
-    public java.util.List<String> snapshot() {
+    public List<String> snapshot() {
         return jdbc.query("SELECT account_id, balance_minor, last_sequence FROM balances ORDER BY account_id",
                 (rs, i) -> rs.getString(1) + ":" + rs.getLong(2) + ":" + rs.getInt(3));
     }
 
     /** Accounts whose balance differs from the sum of their applied payments (should always be empty). */
-    public java.util.List<String> internalMismatches() {
+    public List<String> internalMismatches() {
         return jdbc.query("""
                 SELECT b.account_id FROM balances b LEFT JOIN applied_payments a ON a.account_id = b.account_id
                 GROUP BY b.account_id, b.balance_minor HAVING b.balance_minor <> COALESCE(SUM(a.amount_minor), 0)""",
@@ -156,8 +159,8 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     /** Balance per account. */
-    public java.util.Map<String, Long> balances() {
-        java.util.Map<String, Long> m = new java.util.TreeMap<>();
+    public Map<String, Long> balances() {
+        Map<String, Long> m = new TreeMap<>();
         jdbc.query("SELECT account_id, balance_minor FROM balances", rs -> { m.put(rs.getString(1), rs.getLong(2)); });
         return m;
     }
@@ -168,16 +171,16 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     /** Sequences of an account in the order the ledger applied them. */
-    public java.util.List<Integer> appliedSequences(String accountId) {
+    public List<Integer> appliedSequences(String accountId) {
         return jdbc.queryForList("SELECT sequence FROM applied_payments WHERE account_id = ? ORDER BY apply_order", Integer.class, accountId);
     }
 
     /** Sequences of an account that waited in parked_events before being applied. */
-    public java.util.List<Integer> sequencesAppliedFromPark(String accountId) {
+    public List<Integer> sequencesAppliedFromPark(String accountId) {
         return jdbc.queryForList("SELECT sequence FROM applied_payments WHERE account_id = ? AND was_parked ORDER BY apply_order", Integer.class, accountId);
     }
 
-    public java.util.List<Integer> parkedSequences(String accountId) {
+    public List<Integer> parkedSequences(String accountId) {
         return jdbc.queryForList("SELECT sequence FROM parked_events WHERE account_id = ? ORDER BY sequence", Integer.class, accountId);
     }
 

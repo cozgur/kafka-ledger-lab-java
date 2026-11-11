@@ -7,6 +7,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import lab.ledger.Faults;
 import lab.payments.PaymentCaptured;
 import lab.support.Lab;
@@ -29,25 +30,25 @@ class OffsetDurabilityTest {
                 @Override
                 public void beforeApply(PaymentCaptured e, int attempt) throws Exception {
                     atBeforeDb.countDown();
-                    releaseBeforeDb.await(60, java.util.concurrent.TimeUnit.SECONDS);
+                    releaseBeforeDb.await(60, TimeUnit.SECONDS);
                 }
 
                 @Override
                 public void afterDbWrite(PaymentCaptured e, int partition, long offset) throws Exception {
                     atAfterDb.countDown();
-                    releaseAfterDb.await(60, java.util.concurrent.TimeUnit.SECONDS);
+                    releaseAfterDb.await(60, TimeUnit.SECONDS);
                 }
             });
             lab.producer.publish(lab.topic, List.of(pay("acc-1", 1, 100)));
             try {
                 // Phase 1: record received, DB not written. Over a 1s window the broker offset must not move.
-                assertThat(atBeforeDb.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("listener reached the gate before the DB").isTrue();
+                assertThat(atBeforeDb.await(30, TimeUnit.SECONDS)).as("listener reached the gate before the DB").isTrue();
                 await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(3)).until(() -> lab.committedOffset(0) <= 0);
                 assertThat(lab.ledger.appliedCount()).isZero();
 
                 // Phase 2: DB transaction committed, listener not finished. Still no durable offset.
                 releaseBeforeDb.countDown();
-                assertThat(atAfterDb.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("listener reached the gate after the DB").isTrue();
+                assertThat(atAfterDb.await(30, TimeUnit.SECONDS)).as("listener reached the gate after the DB").isTrue();
                 assertThat(lab.ledger.appliedCount()).isEqualTo(1);
                 await().during(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(3)).until(() -> lab.committedOffset(0) <= 0);
 

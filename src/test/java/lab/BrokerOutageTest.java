@@ -7,12 +7,15 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import lab.payments.PaymentCaptured;
 import lab.payments.PaymentsProducer;
 import lab.support.Infra;
 import lab.support.Lab;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -65,9 +68,9 @@ class BrokerOutageTest {
             await().atMost(Duration.ofSeconds(20)).until(() -> lab.lag() == 0);
 
             // A producer that retries during the outage (request timeout 1s < 3s pause).
-            var retrying = new PaymentsProducer(lab.bootstrap, java.util.Map.of(
-                    org.apache.kafka.clients.producer.ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 1000,
-                    org.apache.kafka.clients.producer.ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 90_000));
+            var retrying = new PaymentsProducer(lab.bootstrap, Map.of(
+                    ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 1000,
+                    ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 90_000));
             // Before the outage: fetch metadata (else send() blocks on it) and open the produce connection with a warm-up
             // record on a side topic, so the outage hits in-flight produce requests, which is when retries duplicate.
             retrying.template().partitionsFor(lab.topic);
@@ -88,7 +91,7 @@ class BrokerOutageTest {
                 unpause();
             }
 
-            CompletableFuture.allOf(inFlight.toArray(CompletableFuture[]::new)).get(java.util.concurrent.TimeUnit.SECONDS.toSeconds(90), java.util.concurrent.TimeUnit.SECONDS);
+            CompletableFuture.allOf(inFlight.toArray(CompletableFuture[]::new)).get(90, TimeUnit.SECONDS);
             retrying.close();
             await().atMost(Duration.ofSeconds(60)).until(() -> lab.lag() == 0);
 

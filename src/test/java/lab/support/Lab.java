@@ -1,10 +1,16 @@
 package lab.support;
 
+import static org.awaitility.Awaitility.await;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import lab.ledger.Faults;
 import lab.ledger.LedgerConsumer;
 import lab.ledger.LedgerRepository;
 import lab.payments.PaymentsProducer;
@@ -13,22 +19,17 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.ListOffsetsResult.ListOffsetsResultInfo;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.OffsetSpec;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.clients.admin.RecordsToDelete;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import static org.awaitility.Awaitility.await;
 
 /** Per-test fixture: a fresh topic, DLT, consumer group and DB schema, so tests never share state. */
 public final class Lab implements AutoCloseable {
@@ -69,10 +70,10 @@ public final class Lab implements AutoCloseable {
     }
 
     public LedgerConsumer startConsumer() {
-        return startConsumer(lab.ledger.Faults.NONE);
+        return startConsumer(Faults.NONE);
     }
 
-    public LedgerConsumer startConsumer(lab.ledger.Faults faults) {
+    public LedgerConsumer startConsumer(Faults faults) {
         var c = new LedgerConsumer(bootstrap, topic, groupId, ledger,
                 new LedgerConsumer.DltPolicy(dltTopic, 3, 100), faults);
         consumers.add(c);

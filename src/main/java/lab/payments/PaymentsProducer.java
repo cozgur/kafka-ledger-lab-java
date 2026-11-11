@@ -2,6 +2,7 @@ package lab.payments;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -23,7 +24,7 @@ public class PaymentsProducer implements AutoCloseable {
 
     /** @param overrides extra producer settings (tests use this, e.g. a short request timeout to force retries) */
     public PaymentsProducer(String bootstrapServers, Map<String, Object> overrides) {
-        var config = new java.util.HashMap<String, Object>(Map.of(
+        var config = new HashMap<String, Object>(Map.of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class,

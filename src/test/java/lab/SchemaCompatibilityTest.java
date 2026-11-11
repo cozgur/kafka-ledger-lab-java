@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -58,7 +59,7 @@ class SchemaCompatibilityTest {
     }
 
     static Object avro(ObjectNode schema) throws Exception {
-        return java.util.Map.of("schemaType", "AVRO", "schema", JSON.writeValueAsString(schema));
+        return Map.of("schemaType", "AVRO", "schema", JSON.writeValueAsString(schema));
     }
 
     JsonNode register(ObjectNode schema) throws Exception {
@@ -77,7 +78,7 @@ class SchemaCompatibilityTest {
     void registerV1() throws Exception {
         subject = "payments.captured." + UUID.randomUUID().toString().substring(0, 8) + "-value"; // TopicNameStrategy
         assertThat(register(load(1)).get("_status").asInt()).isEqualTo(200);
-        assertThat(call("PUT", "/config/" + subject, java.util.Map.of("compatibility", "FULL_TRANSITIVE")).get("_status").asInt()).isEqualTo(200);
+        assertThat(call("PUT", "/config/" + subject, Map.of("compatibility", "FULL_TRANSITIVE")).get("_status").asInt()).isEqualTo(200);
     }
 
     @Test
@@ -121,7 +122,7 @@ class SchemaCompatibilityTest {
 
     @Test
     void theModeIsAProductDecisionBackwardAloneWouldAcceptRemovingAmountMinor() throws Exception {
-        call("PUT", "/config/" + subject, java.util.Map.of("compatibility", "BACKWARD"));
+        call("PUT", "/config/" + subject, Map.of("compatibility", "BACKWARD"));
         assertThat(compatible(variant(load(1), f -> f.remove(indexOf(f, "amountMinor"))))).isTrue();
     }
 }

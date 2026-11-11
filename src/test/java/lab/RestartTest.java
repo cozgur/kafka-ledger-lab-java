@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import lab.ledger.Faults;
@@ -39,12 +40,12 @@ class RestartTest {
                 public void afterDbWrite(PaymentCaptured e, int partition, long offset) throws Exception {
                     if (processed.incrementAndGet() >= 51) { // every consumer thread stops here, not just one
                         atGate.countDown();
-                        gate.await(60, java.util.concurrent.TimeUnit.SECONDS); // bounded: never hang the suite
+                        gate.await(60, TimeUnit.SECONDS); // bounded: never hang the suite
                     }
                 }
             });
             lab.producer.publish(lab.topic, batch(1, 40)); // 200 events
-            assertThat(atGate.await(30, java.util.concurrent.TimeUnit.SECONDS)).as("consumer reached the gate").isTrue();
+            assertThat(atGate.await(30, TimeUnit.SECONDS)).as("consumer reached the gate").isTrue();
             var stopping = CompletableFuture.runAsync(first::stop);
             gate.countDown();
             stopping.join();

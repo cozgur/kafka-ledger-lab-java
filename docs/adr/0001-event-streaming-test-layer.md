@@ -18,7 +18,7 @@
 5. **Explicit error policy:** invalid payloads and conflicts are not retried; processing errors get 3 attempts; then the DLT with the original bytes
    and `dlt.*` headers. Spring's default (10 attempts, then skip) is rejected because it silently loses the payment.
 6. **Contract:** Avro schemas in `schemas/`, subject compatibility FULL_TRANSITIVE (policy tests; the services send JSON).
-7. **Determinism:** Awaitility polling instead of sleeping for results (two deliberate fixed intervals: a lag sampling interval and one 500 ms negative-observation window); deterministic gates for fault injection; every fault test asserts the fault happened; the lag budget
+7. **Determinism:** Awaitility polling instead of sleeping for results (negative checks use bounded `during` windows; the only fixed interval is the lag sampling interval); deterministic gates for fault injection; every fault test asserts the fault happened; the lag budget
    runs alone; the suite is run 20x with `--rerun` before claiming stability.
 
 ## Guarantees tested

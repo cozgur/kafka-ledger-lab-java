@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,7 @@ class ConsistencyTest {
                 String a = String.format("acc-%02d", ai);
                 for (int i = 0; i < 30; i++) events.add(pay(a, i + 1, ((ai + 1) * (i + 3)) % 97 - 40));
             }
-            for (int i = 10; i < events.size() - 1; i += 37) java.util.Collections.swap(events, i, i + 1); // out-of-order
+            for (int i = 10; i < events.size() - 1; i += 37) Collections.swap(events, i, i + 1); // out-of-order
             List<PaymentCaptured> duplicates = new ArrayList<>();
             for (int i = 0; i < events.size(); i += 25) duplicates.add(events.get(i));
             String poison = "{\"paymentId\":\"bad\",\"accountId\":\"acc-00\",\"amountMinor\":1.5,\"currency\":\"EUR\",\"sequence\":31}";

@@ -9,9 +9,14 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import lab.ledger.Faults;
+import lab.ledger.PaymentValidator;
 import lab.payments.PaymentCaptured;
+import lab.payments.PaymentsProducer;
 import lab.support.Lab;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A message that cannot be processed goes to a dead-letter topic (DLT) and does not block its partition:
@@ -25,7 +30,7 @@ class DeadLetterTest {
     }
 
     static String json(PaymentCaptured p) {
-        return lab.payments.PaymentsProducer.toJson(p);
+        return PaymentsProducer.toJson(p);
     }
 
     @Test
@@ -103,8 +108,8 @@ class DeadLetterTest {
         }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "a payload that is {0} is dead-lettered and the next payment still flows")
-    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = {
+    @ParameterizedTest(name = "a payload that is {0} is dead-lettered and the next payment still flows")
+    @CsvSource(delimiter = '|', value = {
             "JSON null|null", "a JSON number|42", "a JSON string|'\"payment\"'", "a JSON array|[]", "not JSON at all|{oops"})
     void nonObjectPayloadsAreDeadLettered(String name, String value) throws Exception {
         try (var lab = new Lab(1)) {
@@ -134,8 +139,8 @@ class DeadLetterTest {
         }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "amount {0} is rejected as invalid, the ledger is untouched")
-    @org.junit.jupiter.params.provider.ValueSource(longs = {1_000_000_000_001L, -1_000_000_000_001L, Long.MIN_VALUE, Long.MAX_VALUE})
+    @ParameterizedTest(name = "amount {0} is rejected as invalid, the ledger is untouched")
+    @ValueSource(longs = {1_000_000_000_001L, -1_000_000_000_001L, Long.MIN_VALUE, Long.MAX_VALUE})
     void amountsOutsideThePerEventBoundAreInvalidPayloads(long amount) throws Exception {
         try (var lab = new Lab(1)) {
             lab.startConsumer();
@@ -151,10 +156,10 @@ class DeadLetterTest {
 
     @Test
     void amountsExactlyAtTheBoundAreAccepted() {
-        long max = lab.ledger.PaymentValidator.MAX_ABS_AMOUNT_MINOR;
+        long max = PaymentValidator.MAX_ABS_AMOUNT_MINOR;
         for (long amount : new long[] {max, -max}) {
             String raw = json(pay("acc-1", 1, amount));
-            assertThat(lab.ledger.PaymentValidator.parse(raw).amountMinor()).isEqualTo(amount);
+            assertThat(PaymentValidator.parse(raw).amountMinor()).isEqualTo(amount);
         }
     }
 }

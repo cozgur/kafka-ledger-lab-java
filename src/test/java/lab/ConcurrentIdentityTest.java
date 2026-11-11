@@ -1,10 +1,12 @@
 package lab;
 
 import static lab.support.Payments.pay;
+import static org.awaitility.Awaitility.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -35,13 +37,12 @@ class ConcurrentIdentityTest {
             }
 
             var b = CompletableFuture.supplyAsync(() -> ledger.applyPayment(pay("acc-2", 2, 20, "p-x")));
-            // B must wait for A (same paymentId), not race past the identity check.
-            Thread.sleep(500); // bounded observation window for a negative check (B has not finished)
-            boolean bFinishedWhileAOpen = b.isDone();
+            // B must wait for A (same paymentId), not race past the identity check: it stays unfinished for a 500 ms window.
+            await().during(Duration.ofMillis(500)).atMost(Duration.ofSeconds(2))
+                    .alias("B still waiting while A's transaction is open").until(() -> !b.isDone());
 
             a.commit();
             Outcome outcomeB = b.get(10, TimeUnit.SECONDS);
-            assertThat(bFinishedWhileAOpen).as("B returned while A's transaction was still open").isFalse();
             assertThat(outcomeB).isEqualTo(Outcome.CONFLICT);
             assertThat(ledger.parkedSequences("acc-2")).isEmpty();
         }

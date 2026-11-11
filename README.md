@@ -1,5 +1,7 @@
 # kafka-ledger-lab-java
 
+[![ci](https://github.com/cozgur/kafka-ledger-lab-java/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cozgur/kafka-ledger-lab-java/actions/workflows/ci.yml)
+
 A small, fintech-flavoured lab for **testing Kafka-based event flows in Java / Spring Kafka**: a `payments` producer publishes
 `PaymentCaptured` events, a `ledger` Spring Kafka consumer applies them to account balances in PostgreSQL, and a JUnit 5 suite proves the
 delivery guarantees between them against a real broker.
@@ -20,6 +22,12 @@ payments (KafkaTemplate) --PaymentCaptured (JSON), key=accountId--> Kafka topic 
 Tests only: Schema Registry (Avro schemas in schemas/, FULL_TRANSITIVE) checks the compatibility policy.
 It is not on the message path: the services send JSON.
 ```
+
+**Spring Boot scope:** the listener container, error handler and producer are built programmatically from Spring Kafka components
+(`ConcurrentMessageListenerContainer`, `DefaultErrorHandler`, `DeadLetterPublishingRecoverer`, `KafkaTemplate`) so that every test can own
+its topic, consumer group, DLT and DB schema and test classes can run in parallel. `LedgerApplication` wires the same components as a Boot
+service and `LedgerApplicationTest` checks that wiring, but Boot's own Kafka auto-configuration, `@KafkaListener` and `application.yml`
+defaults are **not** tested here.
 
 **Stack:** Java 21, Spring Boot 4.1, Spring Kafka 4.1, Apache Kafka 4.1.1 (KRaft, `apache/kafka`), Confluent Schema Registry 8.1.0,
 PostgreSQL 17, Testcontainers 2, JUnit 5, Awaitility, Gradle, GitHub Actions.

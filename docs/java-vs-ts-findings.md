@@ -15,6 +15,8 @@ Spring Kafka. The guarantees under test are the same; several behaviours were no
 | 8 | Producer idempotence | Not exercised | Broker frozen with forced retries: idempotence on = 60 records, off = **90** (30 duplicates). With the default 30s request timeout no retry happened, so the check proved nothing | `BrokerOutageTest` |
 | 9 | Test-infra traps | Lag test flaky when run next to 11 parallel files | Class-init deadlock: a lambda in `Infra`'s static block runs as a static method of `Infra` on another thread; Gradle reports an unchanged test task UP-TO-DATE and runs nothing (`--rerun`) | commit history |
 
+| 10 | Open flaky test | TS suite: 680/680 in its last 20x run | `ConsistencyTest`: 2 failures in 55 main-suite runs, producer got no ack for 120s on one partition; root cause not found (see test strategy) | flakiness runs |
+
 What I would re-verify on any other Java/Spring consumer: the error handler and its back-off (does it skip, block, or dead-letter?),
 `AckMode` and when offsets become durable, `stopImmediate` / shutdown behaviour during deploys, `max.poll.interval.ms` against the
 slowest handler path, and producer `enable.idempotence` / `acks` / retry timeouts.

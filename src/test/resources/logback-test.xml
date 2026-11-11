@@ -2,6 +2,13 @@
   <appender name="OUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder><pattern>%d{HH:mm:ss.SSS} %-5level %logger{30} - %msg%n</pattern></encoder>
   </appender>
+  <!-- Kafka client diagnostics go to a file (not the console) so a rare failure can be investigated afterwards. -->
+  <appender name="KAFKA_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>build/test-logs/kafka-clients.log</file>
+    <encoder><pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{40} - %msg%n</pattern></encoder>
+  </appender>
+  <logger name="org.apache.kafka.clients.producer" level="INFO" additivity="false"><appender-ref ref="KAFKA_FILE"/></logger>
+  <logger name="org.apache.kafka.clients" level="WARN" additivity="false"><appender-ref ref="KAFKA_FILE"/></logger>
   <logger name="org.apache.kafka" level="WARN"/>
   <logger name="org.springframework.kafka" level="WARN"/>
   <logger name="org.testcontainers" level="INFO"/>

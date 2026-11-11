@@ -53,7 +53,18 @@ scripts/flaky-check.sh 20  # whole suite 20x with --rerun, per-test report in bu
 
 ### Results
 
-<!-- RESULTS -->
+Measured locally on 2026-11-11 (Apple Silicon laptop, Docker Desktop, images cached):
+
+- **35 tests** in 13 classes. `./gradlew test` (33 tests, classes in parallel) takes ~30s; then `isolatedTest` (broker outage) and
+  `perfTest` (lag budget) run alone.
+- **Lag burst:** 5,000 events drained in 1.0-1.8s across 40 runs (budget 5s). It started at 18.9s; see the commit history.
+- **Flakiness: 1,893 test executions over 55 suite runs, 2 failures, both in `ConsistencyTest`** (about 1 in 28 runs of the main
+  suite). In both, a producer got no broker acknowledgement for one partition for 120s (`Expiring N record(s) ... 120001 ms`) while
+  the 11 other test classes were starting in parallel. **Root cause not found yet:** it did not reproduce in 15 further runs with
+  client logging on, and the first hypothesis (interference from the broker-outage test) was refuted when it recurred with that test
+  isolated. Kafka client logs are now written to `build/test-logs/kafka-clients.log` for the next occurrence. I am not claiming
+  "0 flaky" for this repo.
+- CI: see the latest GitHub Actions run of this repository.
 
 ### Read more
 

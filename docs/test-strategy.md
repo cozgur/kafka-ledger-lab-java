@@ -50,6 +50,15 @@ Every test is a way this can be violated, plus a check that it isn't.
 - A test must be able to fail: red first where the mechanism didn't exist yet, otherwise a mutation check.
 - Fault-injection tests assert the injected fault really happened.
 
+## Known issue: ConsistencyTest is flaky under parallel load (open)
+
+2 failures in 55 runs of the main suite (1,893 test executions in total). Symptom: `Expiring N record(s) for <topic>-<p>: 120001 ms has
+passed since batch creation`, i.e. the producer got no ack for one partition of a fresh topic for the whole delivery timeout, while the
+other test classes were starting. Not reproduced in 15 runs with client logs. Refuted hypothesis: interference from `BrokerOutageTest`
+pausing its own broker (it recurred with that test moved to `isolatedTest`). Not done on purpose: raising timeouts or retrying the test,
+which would hide the symptom. Next step: inspect `build/test-logs/kafka-clients.log` at the next occurrence (leader/metadata errors on
+the new topic, idempotent producer sequence errors).
+
 ## Not covered
 
 Real process kill; rebalance between two consumer instances; DB failure mid-transaction; DLT write failure; Kafka transactions /

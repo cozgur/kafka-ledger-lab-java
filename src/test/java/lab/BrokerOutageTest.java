@@ -28,8 +28,9 @@ import org.testcontainers.kafka.KafkaContainer;
  * disturb the other test classes running in parallel. Out of scope: multi-broker failover, ISR, leader election.
  *
  * Runs in the separate `isolatedTest` task, not next to the main suite: in one of 20 runs a producer in
- * ConsistencyTest (shared broker) got no ack for 120s while this test was pausing its own broker. The root cause was
- * not proven, but Docker-level fault injection should not share the machine with other tests.
+ * ConsistencyTest (shared broker) got no ack for 120s while this test was pausing its own broker. That hypothesis was
+ * later refuted (the failure recurred with this test isolated; see docs/test-strategy.md), but Docker-level fault
+ * injection still should not share the machine with other tests.
  */
 @Tag("isolated")
 class BrokerOutageTest {

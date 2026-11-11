@@ -119,6 +119,21 @@ public class LedgerRepository implements AutoCloseable {
 
     public enum Outcome { APPLIED, DUPLICATE, STALE, PARKED }
 
+    public int appliedCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM applied_payments", Integer.class);
+    }
+
+    /** All balances sorted by account: a comparable snapshot of the ledger state ("account:balance:lastSequence"). */
+    public java.util.List<String> snapshot() {
+        return jdbc.query("SELECT account_id, balance_minor, last_sequence FROM balances ORDER BY account_id",
+                (rs, i) -> rs.getString(1) + ":" + rs.getLong(2) + ":" + rs.getInt(3));
+    }
+
+    /** Drop all ledger state (used before a replay rebuild). */
+    public void wipe() {
+        jdbc.execute("TRUNCATE balances, applied_payments, parked_events");
+    }
+
     /** Sequences of an account in the order the ledger applied them. */
     public java.util.List<Integer> appliedSequences(String accountId) {
         return jdbc.queryForList("SELECT sequence FROM applied_payments WHERE account_id = ? ORDER BY apply_order", Integer.class, accountId);

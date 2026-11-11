@@ -15,6 +15,7 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.clients.admin.RecordsToDelete;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -86,6 +87,26 @@ public final class Lab implements AutoCloseable {
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * Rewind the ledger group to the earliest retained offset with the Admin API (the group must have no active members;
+     * we wait until it is empty). Java's Admin client can do this directly; the TS lab had to shell out to the CLI.
+     */
+    public void resetGroupToEarliest() throws Exception {
+        await().atMost(Duration.ofSeconds(30)).alias("group " + groupId + " empty").until(() ->
+                admin.describeConsumerGroups(List.of(groupId)).all().get().get(groupId).groupState()
+                        .toString().equalsIgnoreCase("EMPTY"));
+        Map<TopicPartition, OffsetSpec> earliest = new HashMap<>();
+        for (int p = 0; p < partitions; p++) earliest.put(new TopicPartition(topic, p), OffsetSpec.earliest());
+        Map<TopicPartition, OffsetAndMetadata> target = new HashMap<>();
+        admin.listOffsets(earliest).all().get().forEach((tp, info) -> target.put(tp, new OffsetAndMetadata(info.offset())));
+        admin.alterConsumerGroupOffsets(groupId, target).all().get();
+    }
+
+    /** Simulate retention: delete every record of {@code partition} below {@code beforeOffset}. */
+    public void deleteRecordsBefore(int partition, long beforeOffset) throws Exception {
+        admin.deleteRecords(Map.of(new TopicPartition(topic, partition), RecordsToDelete.beforeOffset(beforeOffset))).all().get();
     }
 
     /** Publish raw key/value strings, bypassing the typed producer (used for malformed payloads). */

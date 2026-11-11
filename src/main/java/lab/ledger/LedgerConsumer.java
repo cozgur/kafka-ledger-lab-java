@@ -51,6 +51,10 @@ public class LedgerConsumer implements AutoCloseable {
         // AckMode.RECORD commits each record's offset after the listener returned for it.
         props.setAckMode(AckMode.RECORD);
         props.setDeliveryAttemptHeader(true); // exposes the attempt number to the listener
+        // On stop(), finish the CURRENT record and stop. The default (false) first processes every record already
+        // fetched by the last poll (up to max.poll.records), which made a "graceful stop" drain 200/200 events in
+        // RestartTest. Unprocessed records are simply redelivered after the restart (at-least-once).
+        props.setStopImmediate(true);
         props.setMessageListener((MessageListener<String, String>) (ConsumerRecord<String, String> rec) -> {
             PaymentCaptured event = PaymentValidator.parse(rec.value()); // InvalidPayloadException is not retried
             try {

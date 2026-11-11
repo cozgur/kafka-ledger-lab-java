@@ -4,6 +4,8 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lab.payments.PaymentCaptured;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Ledger persistence. Each instance works inside its own Postgres schema, so tests can run in parallel
@@ -13,6 +15,7 @@ public class LedgerRepository implements AutoCloseable {
 
     private final HikariDataSource dataSource;
     protected final JdbcTemplate jdbc;
+    private final TransactionTemplate tx;
 
     public LedgerRepository(String jdbcUrl, String user, String password, String schema) {
         if (!schema.matches("[a-z_][a-z0-9_]*")) throw new IllegalArgumentException("unsafe schema name: " + schema);
@@ -28,11 +31,20 @@ public class LedgerRepository implements AutoCloseable {
         }
         this.dataSource = new HikariDataSource(cfg);
         this.jdbc = new JdbcTemplate(dataSource);
+        this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS balances (
                   account_id    text PRIMARY KEY,
                   currency      text   NOT NULL,
                   balance_minor bigint NOT NULL
+                )""");
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS applied_payments (
+                  payment_id   text PRIMARY KEY,   -- the idempotency key
+                  account_id   text   NOT NULL,
+                  amount_minor bigint NOT NULL,
+                  sequence     int    NOT NULL,
+                  applied_at   timestamptz NOT NULL DEFAULT now()
                 )""");
     }
 
@@ -45,13 +57,25 @@ public class LedgerRepository implements AutoCloseable {
         return c;
     }
 
-    /** NAIVE on purpose (step 1): no idempotency, no sequence check. Later tests drive the fixes. */
-    public void applyPayment(PaymentCaptured e) {
-        jdbc.update("""
-                INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, ?)
-                ON CONFLICT (account_id) DO UPDATE SET balance_minor = balances.balance_minor + EXCLUDED.balance_minor""",
-                e.accountId(), e.currency(), e.amountMinor());
+    /**
+     * Idempotent apply: the dedupe row and the balance change commit in ONE transaction, so a crash can never leave
+     * "marked applied but balance unchanged" (lost payment) or "balance changed but not marked" (double-apply).
+     */
+    public Outcome applyPayment(PaymentCaptured e) {
+        return tx.execute(status -> {
+            int inserted = jdbc.update("""
+                    INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (payment_id) DO NOTHING""", e.paymentId(), e.accountId(), e.amountMinor(), e.sequence());
+            if (inserted == 0) return Outcome.DUPLICATE;
+            jdbc.update("""
+                    INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, ?)
+                    ON CONFLICT (account_id) DO UPDATE SET balance_minor = balances.balance_minor + EXCLUDED.balance_minor""",
+                    e.accountId(), e.currency(), e.amountMinor());
+            return Outcome.APPLIED;
+        });
     }
+
+    public enum Outcome { APPLIED, DUPLICATE }
 
     /** Balance in minor units, or null if the account has no row. */
     public Long balanceOf(String accountId) {

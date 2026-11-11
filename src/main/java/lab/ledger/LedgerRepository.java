@@ -4,8 +4,6 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lab.payments.PaymentCaptured;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Ledger persistence. Each instance works inside its own Postgres schema, so tests can run in parallel
@@ -15,7 +13,6 @@ public class LedgerRepository implements AutoCloseable {
 
     private final HikariDataSource dataSource;
     protected final JdbcTemplate jdbc;
-    private final TransactionTemplate tx;
 
     public LedgerRepository(String jdbcUrl, String user, String password, String schema) {
         if (!schema.matches("[a-z_][a-z0-9_]*")) throw new IllegalArgumentException("unsafe schema name: " + schema);
@@ -31,7 +28,6 @@ public class LedgerRepository implements AutoCloseable {
         }
         this.dataSource = new HikariDataSource(cfg);
         this.jdbc = new JdbcTemplate(dataSource);
-        this.tx = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS balances (
                   account_id    text PRIMARY KEY,
@@ -59,6 +55,59 @@ public class LedgerRepository implements AutoCloseable {
                   parked_at  timestamptz NOT NULL DEFAULT now(),
                   PRIMARY KEY (account_id, sequence)
                 )""");
+        // The whole apply rule as ONE server-side function: one round trip per event instead of ~6-8. A single
+        // statement runs atomically, so the identity row, balance and last_sequence still change together.
+        jdbc.execute("""
+                CREATE OR REPLACE FUNCTION apply_payment(
+                  p_payment_id text, p_account_id text, p_amount bigint, p_currency text, p_sequence int
+                ) RETURNS text LANGUAGE plpgsql AS $fn$
+                DECLARE
+                  v_last int;
+                  v_next record;
+                BEGIN
+                  INSERT INTO balances (account_id, currency, balance_minor) VALUES (p_account_id, p_currency, 0) ON CONFLICT DO NOTHING;
+                  SELECT last_sequence INTO v_last FROM balances WHERE account_id = p_account_id FOR UPDATE;
+                  -- identity: seen before (applied or parked)? same content = duplicate, different = conflict
+                  IF EXISTS (SELECT 1 FROM applied_payments WHERE payment_id = p_payment_id) THEN
+                    IF EXISTS (SELECT 1 FROM applied_payments WHERE payment_id = p_payment_id
+                               AND account_id = p_account_id AND amount_minor = p_amount AND sequence = p_sequence) THEN
+                      RETURN 'DUPLICATE';
+                    END IF;
+                    RETURN 'CONFLICT';
+                  END IF;
+                  IF EXISTS (SELECT 1 FROM parked_events WHERE payment_id = p_payment_id) THEN
+                    IF EXISTS (SELECT 1 FROM parked_events WHERE payment_id = p_payment_id
+                               AND account_id = p_account_id AND amount_minor = p_amount AND sequence = p_sequence) THEN
+                      RETURN 'DUPLICATE';
+                    END IF;
+                    RETURN 'CONFLICT';
+                  END IF;
+                  -- slot: a new paymentId on a taken sequence (applied or parked) = sequence conflict
+                  IF p_sequence <= v_last THEN RETURN 'SEQUENCE_CONFLICT'; END IF;
+                  IF p_sequence > v_last + 1 THEN
+                    IF EXISTS (SELECT 1 FROM parked_events WHERE account_id = p_account_id AND sequence = p_sequence) THEN
+                      RETURN 'SEQUENCE_CONFLICT';
+                    END IF;
+                    INSERT INTO parked_events (account_id, sequence, payment_id, amount_minor, currency)
+                    VALUES (p_account_id, p_sequence, p_payment_id, p_amount, p_currency);
+                    RETURN 'PARKED';
+                  END IF;
+                  INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence, was_parked)
+                  VALUES (p_payment_id, p_account_id, p_amount, p_sequence, false);
+                  UPDATE balances SET balance_minor = balance_minor + p_amount, last_sequence = p_sequence WHERE account_id = p_account_id;
+                  v_last := p_sequence;
+                  LOOP -- drain parked successors in order
+                    DELETE FROM parked_events WHERE account_id = p_account_id AND sequence = v_last + 1
+                    RETURNING payment_id, amount_minor INTO v_next;
+                    EXIT WHEN NOT FOUND;
+                    v_last := v_last + 1;
+                    INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence, was_parked)
+                    VALUES (v_next.payment_id, p_account_id, v_next.amount_minor, v_last, true);
+                    UPDATE balances SET balance_minor = balance_minor + v_next.amount_minor, last_sequence = v_last WHERE account_id = p_account_id;
+                  END LOOP;
+                  RETURN 'APPLIED';
+                END
+                $fn$""");
     }
 
     private static HikariConfig withoutSchema(HikariConfig cfg) {
@@ -71,7 +120,7 @@ public class LedgerRepository implements AutoCloseable {
     }
 
     /**
-     * Apply one event idempotently and in per-account sequence order, in ONE transaction:
+     * Apply one event idempotently and in per-account sequence order (rule implemented in apply_payment above):
      * 1. lock the account row (concurrent applies for one account are serialised)
      * 2. paymentId seen (applied or parked) -> same content DUPLICATE, different content CONFLICT
      * 3. new paymentId on a taken slot (sequence <= last, or already parked) -> SEQUENCE_CONFLICT
@@ -79,54 +128,8 @@ public class LedgerRepository implements AutoCloseable {
      * 5. sequence == last_sequence + 1 -> APPLIED, then drain parked successors in order
      */
     public Outcome applyPayment(PaymentCaptured e) {
-        return tx.execute(status -> {
-            jdbc.update("INSERT INTO balances (account_id, currency, balance_minor) VALUES (?, ?, 0) ON CONFLICT DO NOTHING",
-                    e.accountId(), e.currency());
-            int last = jdbc.queryForObject("SELECT last_sequence FROM balances WHERE account_id = ? FOR UPDATE", Integer.class, e.accountId());
-            // Identity: a paymentId seen before (applied OR parked): same content = redelivery, different = conflict.
-            var applied = jdbc.queryForList("SELECT account_id, amount_minor, sequence FROM applied_payments WHERE payment_id = ?", e.paymentId());
-            if (!applied.isEmpty()) return sameContent(applied.get(0), e) ? Outcome.DUPLICATE : Outcome.CONFLICT;
-            var parked = jdbc.queryForList("SELECT account_id, amount_minor, sequence FROM parked_events WHERE payment_id = ?", e.paymentId());
-            if (!parked.isEmpty()) return sameContent(parked.get(0), e) ? Outcome.DUPLICATE : Outcome.CONFLICT;
-            // Slot: a NEW paymentId claiming a sequence that is already taken (applied OR parked) -> sequence conflict.
-            if (e.sequence() <= last) return Outcome.SEQUENCE_CONFLICT;
-            if (e.sequence() > last + 1) {
-                if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM parked_events WHERE account_id = ? AND sequence = ?)",
-                        Boolean.class, e.accountId(), e.sequence()))) {
-                    return Outcome.SEQUENCE_CONFLICT;
-                }
-                jdbc.update("INSERT INTO parked_events (account_id, sequence, payment_id, amount_minor, currency) VALUES (?, ?, ?, ?, ?)",
-                        e.accountId(), e.sequence(), e.paymentId(), e.amountMinor(), e.currency());
-                return Outcome.PARKED;
-            }
-            apply(e, false);
-            last = e.sequence();
-            for (;;) { // drain parked successors in order
-                var next = jdbc.query("""
-                        DELETE FROM parked_events WHERE account_id = ? AND sequence = ?
-                        RETURNING payment_id, amount_minor, currency""",
-                        (rs, i) -> new PaymentCaptured(rs.getString(1), e.accountId(), rs.getLong(2), rs.getString(3), 0),
-                        e.accountId(), last + 1);
-                if (next.isEmpty()) break;
-                last++;
-                var p = next.get(0);
-                apply(new PaymentCaptured(p.paymentId(), p.accountId(), p.amountMinor(), p.currency(), last), true);
-            }
-            return Outcome.APPLIED;
-        });
-    }
-
-    private static boolean sameContent(java.util.Map<String, Object> row, PaymentCaptured e) {
-        return e.accountId().equals(row.get("account_id"))
-                && e.amountMinor() == ((Number) row.get("amount_minor")).longValue()
-                && e.sequence() == ((Number) row.get("sequence")).intValue();
-    }
-
-    private void apply(PaymentCaptured e, boolean wasParked) {
-        jdbc.update("INSERT INTO applied_payments (payment_id, account_id, amount_minor, sequence, was_parked) VALUES (?, ?, ?, ?, ?)",
-                e.paymentId(), e.accountId(), e.amountMinor(), e.sequence(), wasParked);
-        jdbc.update("UPDATE balances SET balance_minor = balance_minor + ?, last_sequence = ? WHERE account_id = ?",
-                e.amountMinor(), e.sequence(), e.accountId());
+        return Outcome.valueOf(jdbc.queryForObject("SELECT apply_payment(?, ?, ?, ?, ?)", String.class,
+                e.paymentId(), e.accountId(), e.amountMinor(), e.currency(), e.sequence()));
     }
 
     public enum Outcome { APPLIED, DUPLICATE, CONFLICT, SEQUENCE_CONFLICT, PARKED }

@@ -132,6 +132,13 @@ public final class Lab implements AutoCloseable {
                 .alias("leaders of " + topic).until(() -> admin.listOffsets(latest).all().get().size() == partitions);
     }
 
+    /** Sum of the group's committed offsets over all partitions of the main topic (records the group counts as done). */
+    public long committedTotal() throws Exception {
+        long sum = 0;
+        for (int p = 0; p < partitions; p++) sum += Math.max(committedOffset(p), 0);
+        return sum;
+    }
+
     /** Committed offset of our group for one partition on the broker (-1 = nothing committed). */
     public long committedOffset(int partition) throws Exception {
         var c = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get().get(new TopicPartition(topic, partition));

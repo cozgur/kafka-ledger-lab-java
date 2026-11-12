@@ -51,6 +51,8 @@ val isolatedTest by tasks.registering(Test::class) {
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform { includeTags("isolated") }
     shouldRunAfter(tasks.test)
+    // ProcessKillTest starts the ledger service as a separate JVM with this classpath.
+    systemProperty("lab.serviceClasspath", sourceSets.main.get().runtimeClasspath.asPath)
     testLogging { events("passed", "failed") }
 }
 perfTest { shouldRunAfter(isolatedTest) }

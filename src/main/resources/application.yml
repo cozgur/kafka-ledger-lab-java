@@ -1,0 +1,18 @@
+# Ledger service configuration. Every value can be overridden with an environment variable or a --lab.* argument.
+lab:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    topic: payments.captured
+    group-id: ledger
+    dlt:
+      max-attempts: 3
+      backoff-ms: 100
+  db:
+    url: ${LEDGER_DB_URL:jdbc:postgresql://localhost:5432/ledger}
+    user: ${LEDGER_DB_USER:ledger}
+    password: ${LEDGER_DB_PASSWORD:ledger}
+    schema: ledger
+  fault:
+    # Test-only fault injection, off (0) in normal operation: from the Nth processed record on, every listener thread
+    # blocks right AFTER the DB write and BEFORE the offset is committed. Used to kill -9 the process in that window.
+    pause-after-db-write-at: 0

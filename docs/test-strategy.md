@@ -27,6 +27,10 @@ Every test is a way this can be violated, plus a check that it isn't.
 | Late / out-of-order events | `OutOfOrderTest` | 1,3,2 and 3,1,2 applied as 1,2,3; gap parked until filled. Red first. |
 | Offset committed before the DB write (loss window) | `OffsetDurabilityTest` | Listener gated before and after the DB write; broker offset must not move in either window. Mutation commit-first fails it (the restart test stays green). |
 | Partitions move between instances (scale-out / scale-in) | `RebalanceTest` | A second instance joins mid-stream (wait until the 6 partitions are split between both before producing more), then the first leaves: all 300 applied once, order kept, deliveries bounded. Graceful leave only. |
+| A crash of the process in the loss window | `ProcessKillTest` (isolated) | Ledger service as its own JVM; every listener thread parks after the DB write once 120 records were processed; SIGKILL while applied-in-DB > committed offsets; restart: 300/300 once, order kept, nothing dead-lettered. Mutation: removing the applied-identity check sends 122 redeliveries to the DLT. |
+| A database outage dead-letters valid payments | `DbOutageTest` (isolated) | Own Postgres behind Toxiproxy; connection cut while payments arrive, more than the 3-attempt poison budget passes, connection restored: 0 DLT, all applied in order. Red first (1 valid payment dead-lettered). See ADR 0002. |
+| Partial state after a failure inside the ledger transaction | `TransactionRollbackTest` | A trigger fails the balance update once, after the dedupe row was inserted: between the failed attempt and the retry there is no dedupe row and no balance; the retry applies once. Mutation: swallowing the failure inside `apply_payment` fails it. |
+| A poison message is lost when the DLT is unavailable | `DltWriteFailureTest` | The test's DLT rejects every write: the source offset stays put, the DLT stays empty; after recovery the record is dead-lettered and the payment behind it applied. Mutation: `failIfSendResultIsError(false)` fails it. |
 | Graceful restart loses or repeats work | `RestartTest` | Stop at message 51 with all threads gated, produce while down, restart: 250/250 once, order kept, redeliveries bounded. |
 | Poison message: blocked partition or silent loss | `DeadLetterTest` | Invalid payload (wrong types, JSON null/number/string/array, bad JSON, non-EUR, amount out of bound) -> DLT at once; processing error -> 3 attempts -> DLT; transient error recovers; the next payment always flows. Red first: Spring's default handler skipped the record silently. |
 | Ledger can't be rebuilt, or is rebuilt wrongly | `ReplayTest` | Wipe + `Admin.alterConsumerGroupOffsets` to earliest + replay -> identical snapshot; after simulated retention the ledger parks instead of guessing. |
@@ -42,7 +46,7 @@ Every test is a way this can be violated, plus a check that it isn't.
 |---|---|
 | Listener exception (error handler seeks back, same process) | `IdempotencyTest`, `DeadLetterTest` |
 | Graceful stop (`stop()`, `stopImmediate=true`) | `RestartTest`, `ReplayTest`, `RebalanceTest` (an instance leaves the group) |
-| Process kill (SIGKILL, pod loss) | **not tested**; the commit boundary it relies on is tested by `OffsetDurabilityTest` |
+| Process kill (SIGKILL) | `ProcessKillTest`: the service JVM is killed inside the loss window and restarted |
 
 ## Rules
 
@@ -62,6 +66,6 @@ or retrying tests. After the fix: 20 runs, 800 executions, 0 failures, no `OUT_O
 
 ## Not covered
 
-Real process kill, including an instance dying in the middle of a rebalance; DB failure mid-transaction; DLT write failure; Kafka transactions /
+An instance dying in the middle of a rebalance; Kafka transactions /
 read_committed; multi-broker failover, ISR, `min.insync.replicas`; Avro on the wire (the services send JSON); multi-version schema replay;
 alerting and repair for parked and dead-lettered events; security; production performance.

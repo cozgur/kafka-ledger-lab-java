@@ -15,7 +15,7 @@
    happens inside the listener. `stopImmediate=true`. Idempotent producer, `acks=all`.
 4. **Ledger rule in one Postgres function** (`apply_payment`): row lock per account; paymentId identity (same content = duplicate, different =
    conflict) and sequence slots (new payment on a taken slot = conflict) for applied and parked payments; gap -> park; next -> apply and drain.
-5. **Explicit error policy:** invalid payloads and conflicts are not retried; processing errors get 3 attempts; then the DLT with the original bytes
+5. **Explicit error policy** (infrastructure failures refined in [ADR 0002](0002-infrastructure-failures-vs-poison-messages.md)): invalid payloads and conflicts are not retried; processing errors get 3 attempts; then the DLT with the original bytes
    and `dlt.*` headers. Spring's default (10 attempts, then skip) is rejected because it silently loses the payment.
 6. **Contract:** Avro schemas in `schemas/`, subject compatibility FULL_TRANSITIVE (policy tests; the services send JSON).
 7. **Determinism:** Awaitility polling instead of sleeping for results (negative checks use bounded `during` windows; the only fixed interval is the lag sampling interval); deterministic gates for fault injection; every fault test asserts the fault happened; the lag budget
@@ -28,8 +28,8 @@ differently from the TypeScript version.
 
 ## Out of scope
 
-Exactly-once across Kafka and Postgres; Kafka transactions; multi-broker failover, ISR, leader election; real process kill (also during a
-rebalance; a graceful rebalance between two instances is tested); DB failure mid-transaction; DLT write failure; Avro on the wire; multi-version schema replay; alerting/repair for parked and
+Exactly-once across Kafka and Postgres; Kafka transactions; multi-broker failover, ISR, leader election; an instance dying during a
+rebalance (a graceful rebalance and a SIGKILL of a single instance are tested); Avro on the wire; multi-version schema replay; alerting/repair for parked and
 dead-lettered events; security; production performance.
 
 ## Consequences

@@ -23,6 +23,7 @@ dependencies {
     testImplementation(platform("org.testcontainers:testcontainers-bom:2.0.5"))
     testImplementation("org.testcontainers:testcontainers-kafka")
     testImplementation("org.testcontainers:testcontainers-postgresql")
+    testImplementation("org.testcontainers:testcontainers-toxiproxy")
     testImplementation("org.awaitility:awaitility")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

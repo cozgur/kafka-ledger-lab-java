@@ -49,8 +49,20 @@ public final class Lab implements AutoCloseable {
         this(partitions, Infra.bootstrapServers());
     }
 
+    /** Where the ledger's database is (tests that disturb the DB use their own Postgres behind a proxy). */
+    public record Db(String jdbcUrl, String user, String password, long connectionTimeoutMs) {
+        static Db shared() {
+            return new Db(Infra.POSTGRES.getJdbcUrl(), Infra.POSTGRES.getUsername(), Infra.POSTGRES.getPassword(), 30_000);
+        }
+    }
+
     /** A lab on a specific broker (e.g. a dedicated one for a test that pauses it). */
     public Lab(int partitions, String bootstrap) {
+        this(partitions, bootstrap, Db.shared());
+    }
+
+    /** A lab on a specific broker and database. */
+    public Lab(int partitions, String bootstrap, Db db) {
         this.partitions = partitions;
         this.bootstrap = bootstrap;
         this.admin = Admin.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap));
@@ -61,7 +73,7 @@ public final class Lab implements AutoCloseable {
         }
         awaitLeaders(admin, topic, partitions);
         awaitLeaders(admin, dltTopic, 1);
-        this.ledger = new LedgerRepository(Infra.POSTGRES.getJdbcUrl(), Infra.POSTGRES.getUsername(), Infra.POSTGRES.getPassword(), "t_" + id);
+        this.ledger = new LedgerRepository(db.jdbcUrl(), db.user(), db.password(), "t_" + id, db.connectionTimeoutMs());
         this.producer = new PaymentsProducer(bootstrap);
     }
 

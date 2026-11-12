@@ -18,12 +18,18 @@ public class LedgerRepository implements AutoCloseable {
     protected final JdbcTemplate jdbc;
 
     public LedgerRepository(String jdbcUrl, String user, String password, String schema) {
+        this(jdbcUrl, user, password, schema, 30_000);
+    }
+
+    /** @param connectionTimeoutMs how long a caller waits for a pooled connection before failing (Hikari default 30s) */
+    public LedgerRepository(String jdbcUrl, String user, String password, String schema, long connectionTimeoutMs) {
         if (!schema.matches("[a-z_][a-z0-9_]*")) throw new IllegalArgumentException("unsafe schema name: " + schema);
         HikariConfig cfg = new HikariConfig();
         cfg.setJdbcUrl(jdbcUrl);
         cfg.setUsername(user);
         cfg.setPassword(password);
         cfg.setMaximumPoolSize(6);
+        cfg.setConnectionTimeout(connectionTimeoutMs);
         cfg.setSchema(schema); // search_path for every pooled connection
         // Create the schema with a throwaway connection before the pool starts using it.
         try (var bootstrap = new HikariDataSource(withoutSchema(cfg))) {

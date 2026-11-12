@@ -2,8 +2,13 @@ package lab.ledger;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.sql.SQLNonTransientConnectionException;
+import java.sql.SQLRecoverableException;
+import java.sql.SQLTransientException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.function.Supplier;
 import lab.ledger.PaymentValidator.InvalidPayloadException;
 import lab.payments.PaymentCaptured;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -13,6 +18,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -24,6 +31,8 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.util.backoff.BackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 import org.springframework.util.backoff.FixedBackOff;
 
 /** Ledger side: a Spring Kafka listener container that applies PaymentCaptured events to balances. */
@@ -108,8 +117,36 @@ public class LedgerConsumer implements AutoCloseable {
         });
         var errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(dlt.backoffMs(), dlt.maxAttempts() - 1));
         errorHandler.addNotRetryableExceptions(InvalidPayloadException.class, ConflictException.class);
+        // An infrastructure outage is not a poison message: while the database is unreachable EVERY payment fails, and
+        // dead-lettering them would turn a short outage into a manual repair job (shown red in DbOutageTest). Such errors
+        // are retried without limit, backing off up to 5s; the partition waits, order is kept, nothing goes to the DLT.
+        errorHandler.setBackOffFunction((rec, ex) -> isInfrastructureFailure(ex) ? INFRASTRUCTURE_BACKOFF.get() : null);
         container.setCommonErrorHandler(errorHandler);
         container.start();
+    }
+
+    private static final Supplier<BackOff> INFRASTRUCTURE_BACKOFF = () -> {
+        var backOff = new ExponentialBackOff(200, 2.0);
+        backOff.setMaxInterval(5_000);
+        backOff.setMaxElapsedTime(Long.MAX_VALUE); // keep trying until the database is back
+        return backOff;
+    };
+
+    /** True if the failure means "the database (or the connection to it) is unavailable", not "this record is bad". */
+    static boolean isInfrastructureFailure(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof TransientDataAccessException || t instanceof DataAccessResourceFailureException
+                    || t instanceof SQLTransientException || t instanceof SQLRecoverableException
+                    || t instanceof SQLNonTransientConnectionException) {
+                return true;
+            }
+            // SQLState class 08 = connection exception; 57P = operator intervention (e.g. the server is shutting down)
+            if (t instanceof SQLException sql && sql.getSQLState() != null
+                    && (sql.getSQLState().startsWith("08") || sql.getSQLState().startsWith("57P"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Delivery attempt (1-based) from Spring's header. */

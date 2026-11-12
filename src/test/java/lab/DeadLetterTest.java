@@ -70,7 +70,7 @@ class DeadLetterTest {
                 public void beforeApply(PaymentCaptured e, int attempt) {
                     if (!e.paymentId().equals("acc-2-1")) return;
                     attempts.add(attempt);
-                    throw new IllegalStateException("simulated DB outage");
+                    throw new IllegalStateException("simulated processing failure");
                 }
             });
             lab.producer.publish(lab.topic, List.of(pay("acc-1", 1, 100), pay("acc-2", 1, 20), pay("acc-3", 1, 50)));
@@ -83,7 +83,7 @@ class DeadLetterTest {
             assertThat(header(dead, "dlt.original.offset")).isEqualTo("1");
             assertThat(header(dead, "dlt.reason")).isEqualTo("processing-failed");
             assertThat(header(dead, "dlt.attempts")).isEqualTo("3");
-            assertThat(header(dead, "dlt.error")).contains("simulated DB outage");
+            assertThat(header(dead, "dlt.error")).contains("simulated processing failure");
         }
     }
 

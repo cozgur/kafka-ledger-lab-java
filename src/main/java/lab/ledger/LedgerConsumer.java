@@ -100,6 +100,9 @@ public class LedgerConsumer implements AutoCloseable {
                 (rec, ex) -> new TopicPartition(dlt.topic(), 0));
         // Original key/value bytes are kept; diagnostics go to headers. The recoverer publishes synchronously and only
         // then is the original offset committed, so a crash in between duplicates the DLT entry but never loses it.
+        // Spring's default, made explicit because losing a poison message depends on it: if the DLT write fails, recovery
+        // fails, the source offset is NOT committed and the record is retried (DltWriteFailureTest; with false it is lost).
+        recoverer.setFailIfSendResultIsError(true);
         recoverer.setHeadersFunction((rec, ex) -> {
             Throwable cause = rootCause(ex);
             boolean invalid = cause instanceof InvalidPayloadException;
